@@ -4,7 +4,7 @@ In case you have no experience with github, no worries, you don't need to know m
 
 # The Big Idea
 
-The data in the quarto document is a compilation of "Total Asset" and "Total Deposits" as reported in the FDIC through this link https://state-tables.fdic.gov/, by State across time. The main states we're interested I think are NY and CA, they were the states with the most connection to First Republic and SVB and as you can see they have the most visible effects in the first quarter of 2023.
+The data in the quarto document is a compilation of "Total Asset" and "Total Deposits" as reported in the FDIC through this link https://state-tables.fdic.gov/, by State across time. The main states I think we're interested in are NY and CA, they were the states with the most connection to First Republic and SVB and as you can see they have the most visible effects in the first quarter of 2023.
 
 It's still not clear where precisely we will draw the line for the groups, but I think the effect is rather clear overall. Maybe we just do NY & CA against the rest... so long as we write about our justifications and include decent background we will be fine.
 
