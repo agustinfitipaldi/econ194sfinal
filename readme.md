@@ -20,6 +20,12 @@ It's still not clear where precisely we will draw the line for the groups, but I
 
 5. Do NBER writeup
 
+### Little To-Do
+- add institution type selector
+- add date range option
+- combine aggregator into scraper
+- allow choosing aggregate fields
+
 # Event Overviews
 
 ## SVB Overview
