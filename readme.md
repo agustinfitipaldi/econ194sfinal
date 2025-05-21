@@ -4,13 +4,14 @@ In case you have no experience with github, no worries, you don't need to know m
 
 # The Big Idea
 
-The data in the quarto document is a compilation of "Total Asset" and "Total Deposits" as reported in the FDIC through this link https://state-tables.fdic.gov/, by State across time. The main states we're interested I think are NY and CA, they were the states with the most connection to First Republic and SVB and as you can see they have the most visible effects in the first quarter of 2023.
+The data in the quarto document is a compilation of "Total Asset" and "Total Deposits" as reported in the FDIC through this link https://state-tables.fdic.gov/, by State across time. The main states I think we're interested in are NY and CA, they were the states with the most connection to First Republic and SVB and as you can see they have the most visible effects in the first quarter of 2023.
 
 It's still not clear where precisely we will draw the line for the groups, but I think the effect is rather clear overall. Maybe we just do NY & CA against the rest... so long as we write about our justifications and include decent background we will be fine.
 
 ## To-Do
 
 1. Establish groups
+	- CA and NY appear to be the only movers, need to figure out why this is the case before bundling them into groups
 
 2. Calculate means as shown in Lecture slides
 
@@ -20,9 +21,15 @@ It's still not clear where precisely we will draw the line for the groups, but I
 
 5. Do NBER writeup
 
-# Event Overviews
+# Notes
 
-## SVB Overview
+- Problem Bank List, highly confidential, contains banks FDIC and co are worried about, comes from CAMELS rating, only number of banks on list and fluctuations quarter to quarter are reported
+
+- CAMELS rating, also highly confidential, grades banks on Capital adequacy, Assets, Management Capability, Earnings, Liquidity, and Sensitivity [link](https://en.wikipedia.org/wiki/CAMELS_rating_system)
+
+## Event Overview
+
+### SVB Overview
 
 1. SVB had purchased a lot of long term treasury bonds
 
@@ -36,7 +43,7 @@ It's still not clear where precisely we will draw the line for the groups, but I
 
 6. On March 10th CDFPI seized the bank and put it under the receivership of FDIC
 
-## First Republic
+### First Republic
 
 1. In a similar situation to SVB with a high percentage of uninsured deposits, mainly from NY
 
