@@ -55,9 +55,5 @@ wheels/
 *.egg
 
 # Generated files
-*.png
-*.jpg
-*.jpeg
 *.gif
 *.pdf
-*.csv 
