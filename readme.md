@@ -1,27 +1,32 @@
-# What to do with this repository
-
-In case you have no experience with github, no worries, you don't need to know much (although I'd recommend learning it at one point), just click on the green "<> Code" button in the top-right ish, and in the dropdown select "Download Zip". Then proceed as you usually do with unpacking the zip etc. If you open the bank.qmd file in R studio (after making sure you have all the packages installed using install.packages("packagename")) you should get the html file. You can also just open the html file included
-
 # The Big Idea
 
-The data in the quarto document is a compilation of "Total Asset" and "Total Deposits" as reported in the FDIC through [this link](https://state-tables.fdic.gov/), by State across time. The main states I think we're interested in are NY and CA, they were the states with the most connection to First Republic and SVB and as you can see they have the most visible effects in the first quarter of 2023.
+Compare how the collapse of Silicon Valley Bank (& Co?) affected a variety of bank measures using a difference in difference design with California as the treated group and the rest of the 50 states as the untreated group.
 
-It's still not clear where precisely we will draw the line for the groups, but I think the effect is rather clear overall. Maybe we just do NY & CA against the rest... so long as we write about our justifications and include decent background we will be fine.
+- Core Deposits to Total Liabilities - CA vs Rest (minus NV?)
+ 
+- Earning Assets - CA vs Rest (add NY for robustness?)
 
-## To-Do
+- Equity Capital - CA vs Rest (looks very similar to EA)
 
-1. Establish groups
-	- CA and NY appear to be the only movers, need to figure out why this is the case before bundling them into groups
+- Gross 1-4 Family Mortgages to Gross Assets - CA vs Rest
 
-2. Calculate means as shown in Lecture slides
+- Return on Assets - CA vs Rest (there are other movers 2023Q1, add in for robust)
+    - Assets Less than 1bn has a lagged response?
 
-3. Do difference in difference thing
+- Return on Equity - CA vs Rest (there are other movers...)
+    - Same deal as for ROA
 
-4. Make slides
+- Total Assets - CA vs Rest
 
-5. Do NBER writeup
+- Total Deposits - CA vs Rest
+
+- Total Loans & Leases - CA vs Rest
+    - Isn't this a rehashing of Total Assets? What's kept out?
+
 
 # Notes
+
+- Should we/can we add fixed effects for state and time?
 
 - Problem Bank List, highly confidential, contains banks FDIC and co are worried about, comes from CAMELS rating, only number of banks on list and fluctuations quarter to quarter are reported
 
