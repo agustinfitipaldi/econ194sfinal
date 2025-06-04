@@ -87,7 +87,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Change in Core Deposits After Shock",
        x = "State",
-       y = "Difference (Q1 2023 - Q4 2022)") +
+       y = "Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -162,7 +162,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Core Deposits After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 ```{r}
@@ -233,7 +233,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Earning Assets After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -304,7 +304,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Equity Capital After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -375,7 +375,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Mortgages to Assets After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -446,7 +446,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Return on Assets After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -517,7 +517,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Return on Equity After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -588,7 +588,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Total Assets After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -659,7 +659,7 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Total Deposits After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
 
@@ -730,6 +730,6 @@ ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   coord_flip() +
   labs(title = "Log Change in Total Loans & Leases After Shock",
        x = "State",
-       y = "Log Difference (Q1 2023 - Q4 2022)") +
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
 ```
