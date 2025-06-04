@@ -8,6 +8,7 @@ format: pdf
 ```{r}
 #| warning: false
 #| message: false
+#| echo: false
 
 library(dplyr)
 library(readr)
@@ -19,9 +20,9 @@ bank <- read_csv("combined_fdic_data.csv")
 ```{r}
 #| warning: false
 #| message: false
+#| echo: false
 #| tbl-cap: "Core Deposits to Total Liabilities"
 #| label: tbl-core
-
 
 
 #rename and change data types
@@ -66,6 +67,72 @@ gt_table <- head(merged, 10) %>%
     total_core_deposits_q4_2022 = "2022 Q4",
     total_core_deposits_q1_2023 = "2023 Q1",
     diff = "Change After Shock"
+  ) %>% 
+  cols_align(
+    align = "left",
+    columns = State
+  ) %>% 
+  cols_align(
+    align = "center",
+    columns = c(total_core_deposits_q4_2022, total_core_deposits_q1_2023, diff)
+  )
+  
+# print table 
+gt_table
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| tbl-cap: "Log Core Deposits to Total Liabilities"
+#| label: tbl-log_core
+
+lbank <- read_csv("combined_fdic_data_log.csv")
+
+
+#rename and change data types
+names(lbank)[10] <- "core_deposit"
+lbank$State <- as.factor(lbank$State)
+lbank$core_deposit <- as.numeric(lbank$core_deposit)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+#change date to date format
+bank <- lbank %>% 
+  mutate(
+    year = as.numeric(format(Date, "%Y")),
+    month = as.numeric(format(Date, "%m"))) 
+
+#get 2022 Q4 data for total core deposits by State
+q4_2022 <- bank %>% 
+  filter(year == 2022, month %in% c(10, 11, 12)) %>% 
+  group_by(State) %>% 
+  summarize(total_core_deposits = sum(core_deposit))
+
+#get 2023 Q1 data for total core deposits by State
+q1_2023 <- bank %>% 
+  filter(year == 2023, month %in% c(1, 2, 3)) %>% 
+  group_by(State) %>% 
+  summarize(total_core_deposits = sum(core_deposit))
+
+#merge dataframes together for table
+merged <- merge(q4_2022, q1_2023, by = "State", suffixes = c("_q4_2022", "_q1_2023"))
+
+#calculate difference between 2022 and 2023
+merged$diff <- merged$total_core_deposits_q1_2023 - merged$total_core_deposits_q4_2022   
+
+#sort descending order
+merged <- merged %>% 
+  arrange(diff)
+
+
+#construct gt table
+gt_table <- head(merged, 10) %>% 
+  gt() %>% 
+  cols_label(
+    total_core_deposits_q4_2022 = "2022 Q4",
+    total_core_deposits_q1_2023 = "2023 Q1",
+    diff = "Percent Change After Shock"
   ) %>% 
   cols_align(
     align = "left",
