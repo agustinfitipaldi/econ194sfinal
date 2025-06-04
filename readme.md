@@ -1,5 +1,15 @@
 # The Big Idea
 
+Do bank collapses have regional contagion?
+
+First Order Effects: Did Silicon Valley Bank's collapse cause an outsized effect on key banking variables on bordering states when compared with other states?
+
+Variables: Equity Capital, Gross 1-4 Family Mortgages?, Total Assets, Total Deposits, Core Deposits to Total Liabilities
+
+
+
+
+
 Compare how the collapse of Silicon Valley Bank (& Co?) affected a variety of bank measures using a difference in difference design with California as the treated group and the rest of the 50 states as the untreated group.
 
 - Core Deposits to Total Liabilities - CA vs Rest (minus NV?)
