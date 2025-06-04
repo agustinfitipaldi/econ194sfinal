@@ -13,7 +13,7 @@ def log_transform_fdic_data(input_file):
     df = pd.read_csv(input_file)
     
     # Identify columns to skip (non-numeric)
-    skip_columns = ['Obs', 'State', 'Date']
+    skip_columns = ['Obs', 'State', 'Date','30-89 Past Due Loans to Total Loans & Leases - All Institutions','30-89 Past Due Loans to Total Loans & Leases - Assets Less Than $1 Billion','30-89 Past Due Loans to Total Loans & Leases - Assets Greater Than $1 Billion','Net Charge-Offs to Loans & Leases - All Institutions','Net Charge-Offs to Loans & Leases - Assets Less Than $1 Billion','Net Charge-Offs to Loans & Leases - Assets Greater Than $1 Billion']
     
     # Process each numeric column
     for column in df.columns:
