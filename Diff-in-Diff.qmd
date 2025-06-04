@@ -1,0 +1,46 @@
+---
+title: "Final Presentation"
+author: "Tony Segal"
+date: "June 3, 2025"
+format: pdf
+---
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+library(dplyr)
+library(readr)
+library(gt)
+library(ggplot2)
+library(estimatr)
+library(modelsummary)
+
+lbank <- read_csv("combined_fdic_data_log.csv")
+
+names(lbank)[10] <- "core_deposit"
+lbank$State <- as.factor(lbank$State)
+lbank$core_deposit <- as.numeric(lbank$core_deposit)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+```
+
+
+$$
+Y_{it} = \beta_0 + \beta_1X_{it} + \gamma_i + \tau_t + \epsilon_{it}
+$$
+```{r}
+lbank$west <- ifelse(lbank$State %in% c("California", "Oregon", "Arizona", "Nevada", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico"), 1, 0)
+lbank$year <- format(lbank$Date, "%Y")
+lbank$post <- ifelse(lbank$Date >= as.Date("2023-03-31"), 1, 0)
+lbank$post <- as.factor(lbank$post)
+lbank$west <- as.factor(lbank$west)
+
+reg <- lm_robust(core_deposit ~ west + post + west*post, data = lbank, se_type = "HC1")
+summary(reg)
+```
+```{r}
+ggplot()
+```
+
