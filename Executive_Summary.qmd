@@ -1,0 +1,204 @@
+---
+title: "Some fun creative title"
+author: "Tony Segal, Agustin Fitipaldi, Andrew Reilly, Elijah Stevenson"
+date: "June 5, 2025"
+format: pdf
+---
+
+# Executive Summary
+
+yap here ...
+
+specification below ...
+
+$$
+\text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
+$$
+Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is 1 if state i is on the west coast after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects. 
+
+Table showing parallel trend assumption below. Lines moving parallel before crash, and then sudden drop in west coast states after crash. ...
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+library(dplyr)
+library(readr)
+library(gt)
+library(ggplot2)
+library(estimatr)
+library(modelsummary)
+
+lbank <- read_csv("combined_fdic_data_log.csv")
+
+names(lbank)[10] <- "core_deposit"
+lbank$State <- as.factor(lbank$State)
+lbank$core_deposit <- as.numeric(lbank$core_deposit)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+# Filter out Nevada
+lbank <- lbank %>%
+  filter(State != "Nevada")
+
+lbank$west <- ifelse(lbank$State %in% c("Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico"), 1, 0)
+lbank$year <- format(lbank$Date, "%Y")
+lbank$post <- ifelse(lbank$Date >= as.Date("2023-03-31"), 1, 0)
+lbank$post <- as.factor(lbank$post)
+lbank$west <- as.factor(lbank$west)
+
+# Calculate averages for Western and non-Western states
+avg_deposits <- lbank %>%
+  group_by(Date, west) %>%
+  summarize(avg_core_deposit = mean(core_deposit, na.rm = TRUE)) %>%
+  mutate(Region = ifelse(west == 1, "Western States", "Non-Western States"))
+
+# Create single plot with averages
+ggplot(data = avg_deposits,
+       aes(x = Date, y = avg_core_deposit, color = Region)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = "Average Core Deposits Over Time - Western vs Non-Western States",
+       x = "Date",
+       y = "Core Deposits (log)",
+       color = "Region") + 
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = min(avg_deposits$avg_core_deposit) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4)
+```
+
+Linear regression model with time and state fixed effects ...
+
+```{r}
+#| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
+#| label: tbl-pannel
+#| echo: false
+
+lbank$crash <- ifelse(lbank$west == 1 & lbank$post == 1, 1, 0)
+lbank$Date <- as.factor(lbank$Date)
+
+#create 4 different models
+model1 <- lm_robust(core_deposit ~ crash, data = lbank, se_type = "HC1")
+
+model2 <- lm_robust(core_deposit ~ crash + State, data = lbank, se_type = "HC1")
+
+model3 <- lm_robust(core_deposit ~ crash + Date, data = lbank, se_type = "HC1")
+
+model4 <- lm_robust(core_deposit ~ crash + State + Date, data = lbank, se_type = "HC1")
+
+#create list of models
+models_list <- list(
+  "(1)" = model1,
+  "(2)" = model2,
+  "(3)" = model3,
+  "(4)" = model4
+)
+
+modelsummary(models_list,
+             title = "Effect of Silicon Valley Bank Crash on Western States",
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("crash" = "Bank Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|Date",
+             fmt = "%.3f", 
+             notes = "Robust standard erros in parenthesis.",
+             add_rows = tribble(
+               ~term,      ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE", "No",    "Yes",   "No",    "Yes",
+               "Year FE",  "No",    "No",    "Yes",    "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = "Log Core Deposits",
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
+Can introduce these tables and graphs before if necessary:
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| tbl-cap: "Log Core Deposits to Total Liabilities"
+#| label: tbl-log_core
+
+lbank <- read_csv("combined_fdic_data_log.csv")
+
+
+#rename and change data types
+names(lbank)[10] <- "core_deposit"
+lbank$State <- as.factor(lbank$State)
+lbank$core_deposit <- as.numeric(lbank$core_deposit)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+#change date to date format
+bank <- lbank %>% 
+  mutate(
+    year = as.numeric(format(Date, "%Y")),
+    month = as.numeric(format(Date, "%m"))) 
+
+#get 2022 Q4 data for total core deposits by State
+q4_2022 <- bank %>% 
+  filter(year == 2022, month %in% c(10, 11, 12)) %>% 
+  group_by(State) %>% 
+  summarize(total_core_deposits = sum(core_deposit))
+
+#get 2023 Q1 data for total core deposits by State
+q1_2023 <- bank %>% 
+  filter(year == 2023, month %in% c(1, 2, 3)) %>% 
+  group_by(State) %>% 
+  summarize(total_core_deposits = sum(core_deposit))
+
+#merge dataframes together for table
+merged <- merge(q4_2022, q1_2023, by = "State", suffixes = c("_q4_2022", "_q1_2023"))
+
+#calculate difference between 2022 and 2023
+merged$diff <- merged$total_core_deposits_q1_2023 - merged$total_core_deposits_q4_2022   
+
+#sort descending order
+merged <- merged %>% 
+  arrange(diff)
+
+
+#construct gt table
+gt_table <- head(merged, 10) %>% 
+  gt() %>% 
+  cols_label(
+    total_core_deposits_q4_2022 = "2022 Q4",
+    total_core_deposits_q1_2023 = "2023 Q1",
+    diff = "Log Change After Shock"
+  ) %>% 
+  cols_align(
+    align = "left",
+    columns = State
+  ) %>% 
+  cols_align(
+    align = "center",
+    columns = c(total_core_deposits_q4_2022, total_core_deposits_q1_2023, diff)
+  )
+  
+# print table 
+gt_table
+
+# Add bar graph
+ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Log Change in Core Deposits After Shock",
+       x = "State",
+       y = "Log Difference (2022 Q4 - 2023 Q1)") +
+  theme_minimal()
+```
+
+Ill try to add comments to the code later too
