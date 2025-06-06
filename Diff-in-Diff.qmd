@@ -2,7 +2,7 @@
 title: "Final Presentation"
 author: "Tony Segal"
 date: "June 3, 2025"
-format: pdf
+format: html
 ---
 
 ```{r}
@@ -35,7 +35,7 @@ $$
 Y_{it} = \beta_0 + \beta_1X_{it} + \gamma_i + \tau_t + \epsilon_{it}
 $$
 ```{r}
-lbank$west <- ifelse(lbank$State %in% c("California", "Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico"), 1, 0)
+lbank$west <- ifelse(lbank$State %in% c("Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico"), 1, 0)
 lbank$year <- format(lbank$Date, "%Y")
 lbank$post <- ifelse(lbank$Date >= as.Date("2023-03-31"), 1, 0)
 lbank$post <- as.factor(lbank$post)
@@ -45,6 +45,9 @@ reg <- lm_robust(core_deposit ~ west + post + west*post, data = lbank, se_type =
 summary(reg)
 ```
 ```{r}
+#| warning: false
+#| message: false
+
 # Calculate averages for Western and non-Western states
 avg_deposits <- lbank %>%
   filter(Date <= as.Date("2022-12-31")) %>%
@@ -65,3 +68,88 @@ ggplot(data = avg_deposits,
         plot.title = element_text(size = 12),
         axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
+
+```{r}
+#| warning: false
+#| message: false
+
+# Calculate averages for Western and non-Western states
+avg_deposits <- lbank %>%
+  group_by(Date, west) %>%
+  summarize(avg_core_deposit = mean(core_deposit, na.rm = TRUE)) %>%
+  mutate(Region = ifelse(west == 1, "Western States", "Non-Western States"))
+
+# Create single plot with averages
+ggplot(data = avg_deposits,
+       aes(x = Date, y = avg_core_deposit, color = Region)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = "Average Core Deposits Over Time - Western vs Non-Western States",
+       x = "Date",
+       y = "Core Deposits (log)",
+       color = "Region") + 
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = min(avg_deposits$avg_core_deposit) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4)
+```
+```{r}
+lbank$crash <- ifelse(lbank$west == 1 & lbank$post == 1, 1, 0)
+lbank$Date <- as.factor(lbank$Date)
+
+#Panel Regression set up with state and year fixed effects
+panel_reg <-lm_robust(core_deposit ~ crash + State + Date, data = lbank, se_type = "HC1")
+preg_sum <- summary(panel_reg)
+preg_sum$coefficients[2,]
+```
+```{r}
+#| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
+#| label: tbl-pannel
+
+#create 4 different models
+model1 <- lm_robust(core_deposit ~ crash, data = lbank, se_type = "HC1")
+
+model2 <- lm_robust(core_deposit ~ crash + State, data = lbank, se_type = "HC1")
+
+model3 <- lm_robust(core_deposit ~ crash + Date, data = lbank, se_type = "HC1")
+
+model4 <- lm_robust(core_deposit ~ crash + State + Date, data = lbank, se_type = "HC1")
+
+#create list of models
+models_list <- list(
+  "(1)" = model1,
+  "(2)" = model2,
+  "(3)" = model3,
+  "(4)" = model4
+)
+
+modelsummary(models_list,
+             title = "Effect of Silicon Valley Bank Crash on Western States",
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("crash" = "Bank Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|Date",
+             fmt = "%.3f", 
+             notes = "Robust standard erros in parenthesis.",
+             add_rows = tribble(
+               ~term,      ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE", "No",    "Yes",   "No",    "Yes",
+               "Year FE",  "No",    "No",    "Yes",    "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = "Log Core Deposits",
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
