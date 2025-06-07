@@ -33,12 +33,12 @@ analysis_variable <- "Equity Capital to Total Assets - All Institutions"  # Main
 #                "Cost of Funding Earning Assets - All Institutions", etc.
 
 # States to include/exclude
-include_california <- TRUE  # Include California in clustering and analysis
+include_california <- FALSE  # Include California in clustering and analysis
 exclude_states <- c("Nevada")  # List of states to remove entirely
 # Example: c("Nevada", "Delaware", "South Dakota") for multiple states
 
 # Clustering configuration
-include_california_in_clustering <- TRUE  # Include CA in the clustering algorithm itself
+include_california_in_clustering <- FALSE  # Include CA in the clustering algorithm itself
 clustering_variable <- "Equity Capital to Total Assets - All Institutions"  # Variable used for k-means clustering
 # Can be different from analysis_variable if desired
 
@@ -318,21 +318,32 @@ print(paste("Dependent variable:", analysis_variable))
 print(paste("States included:", nrow(lbank %>% distinct(State))))
 
 lbank$crash <- ifelse(lbank$west == 1 & lbank$post == 1, 1, 0)
-lbank$Date <- as.factor(lbank$Date)
+
+# Create more appropriate time fixed effects for quarterly data
+lbank$year <- as.numeric(format(lbank$Date, "%Y"))
+lbank$quarter <- quarters(lbank$Date)
+lbank$year_quarter <- paste(lbank$year, lbank$quarter, sep = "_")
+lbank$year_quarter <- as.factor(lbank$year_quarter)
+lbank$State <- as.factor(lbank$State)
+
+print("Treatment variable check:")
+print(paste("Crash observations:", sum(lbank$crash)))
+print(paste("Post-treatment periods:", length(unique(lbank$Date[lbank$post == 1]))))
+print(paste("Western states:", length(unique(lbank$State[lbank$west == 1]))))
 
 # Create formula dynamically based on analysis_variable
-# Wrap variable name in backticks to handle spaces and special characters
+# Use year-quarter fixed effects instead of date fixed effects for cleaner quarterly identification
 base_formula <- as.formula(paste("`", analysis_variable, "` ~ crash", sep=""))
 state_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + State", sep=""))
-date_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + Date", sep=""))
-full_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + State + Date", sep=""))
+time_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + year_quarter", sep=""))
+full_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + State + year_quarter", sep=""))
 
 #create 4 different models using the analysis variable
 model1 <- lm_robust(base_formula, data = lbank, se_type = "HC1")
 
 model2 <- lm_robust(state_formula, data = lbank, se_type = "HC1")
 
-model3 <- lm_robust(date_formula, data = lbank, se_type = "HC1")
+model3 <- lm_robust(time_formula, data = lbank, se_type = "HC1")
 
 model4 <- lm_robust(full_formula, data = lbank, se_type = "HC1")
 
@@ -350,13 +361,13 @@ modelsummary(models_list,
              gof_map = c("nobs"),
              coef_map = c("crash" = "Bank Crash",
                           "(Intercept)" = "Intercept"),
-             coef_omit = "State|Date",
+             coef_omit = "State|year_quarter",
              fmt = "%.3f", 
              notes = "Robust standard errors in parenthesis.",
              add_rows = tribble(
-               ~term,      ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
-               "State FE", "No",    "Yes",   "No",    "Yes",
-               "Year FE",  "No",    "No",    "Yes",    "Yes"
+               ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE",    "No",    "Yes",   "No",    "Yes",
+               "Quarter FE",  "No",    "No",    "Yes",   "Yes"
              ),
              output = "gt") %>% 
   tab_spanner(
@@ -388,7 +399,12 @@ lbank_reg_kmeans <- lbank %>%
     kmeans_crash = ifelse(kmeans_treatment == 1 & post == 1, 1, 0)
   )
 
-lbank_reg_kmeans$Date <- as.factor(lbank_reg_kmeans$Date)
+# Create time fixed effects for k-means regression too
+lbank_reg_kmeans$year <- as.numeric(format(lbank_reg_kmeans$Date, "%Y"))
+lbank_reg_kmeans$quarter <- quarters(lbank_reg_kmeans$Date)
+lbank_reg_kmeans$year_quarter <- paste(lbank_reg_kmeans$year, lbank_reg_kmeans$quarter, sep = "_")
+lbank_reg_kmeans$year_quarter <- as.factor(lbank_reg_kmeans$year_quarter)
+lbank_reg_kmeans$State <- as.factor(lbank_reg_kmeans$State)
 
 print("=== K-MEANS REGRESSION SETUP ===")
 print(paste("Cluster 1 states:", sum(lbank_reg_kmeans$kmeans_treatment == 1 & !duplicated(lbank_reg_kmeans$State))))
@@ -398,13 +414,13 @@ print(paste("Cluster 2 states:", sum(lbank_reg_kmeans$kmeans_treatment == 0 & !d
 # Wrap variable name in backticks to handle spaces and special characters
 base_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash", sep=""))
 state_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + State", sep=""))
-date_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + Date", sep=""))
-full_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + State + Date", sep=""))
+time_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + year_quarter", sep=""))
+full_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + State + year_quarter", sep=""))
 
 # Create k-means models
 model1_kmeans <- lm_robust(base_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
 model2_kmeans <- lm_robust(state_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
-model3_kmeans <- lm_robust(date_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
+model3_kmeans <- lm_robust(time_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
 model4_kmeans <- lm_robust(full_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
 
 # Create list of k-means models
@@ -421,13 +437,13 @@ modelsummary(models_list_kmeans,
              gof_map = c("nobs"),
              coef_map = c("kmeans_crash" = "K-Means Cluster Crash",
                           "(Intercept)" = "Intercept"),
-             coef_omit = "State|Date",
+             coef_omit = "State|year_quarter",
              fmt = "%.3f", 
              notes = "Robust standard errors in parenthesis. Cluster 1 treated as treatment group.",
              add_rows = tribble(
-               ~term,      ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
-               "State FE", "No",    "Yes",   "No",    "Yes",
-               "Year FE",  "No",    "No",    "Yes",    "Yes"
+               ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE",    "No",    "Yes",   "No",    "Yes",
+               "Quarter FE",  "No",    "No",    "Yes",   "Yes"
              ),
              output = "gt") %>% 
   tab_spanner(
