@@ -45,4 +45,4 @@ def plot_time_series(csv_file):
         plt.close()
 
 if __name__ == "__main__":
-    plot_time_series('combined_fdic_data.csv') 
+    plot_time_series('combined_fdic_data_log.csv') 
