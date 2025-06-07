@@ -23,6 +23,8 @@ $$
 \text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
 $$ Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is $1$ if state $i$ is in our treatment group after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects.
 
+![](images/MapChart_Map(2).png)
+
 Below you can see a standard graph showing averages in core deposits to total liabilities across both groups. You can see that movement is mostly similar, albeit with slightly off sync jumps, and the western states drop below the other states after the crash.
 
 ```{r}
@@ -314,14 +316,12 @@ state_trends <- lbank %>%
 #print("Summary of post-treatment trends:")
 #print(summary(state_trends$post_trend))
 
-# Step 2: Define the objective function
-objective_function <- function(assignment, penalty_weight = 1.0) {
+# Step 2: Improved optimization approach
+# Direct constrained k-means with emphasis on the differential space objective
+constrained_kmeans_objective <- function(assignment, pre_weight = 10.0, post_weight = 1.0) {
   if(length(unique(assignment)) != 2 || min(table(assignment)) < min_group_size) {
     return(-Inf)  # Ensure both groups have at least min_group_size states
   }
-  
-  group1_states <- state_trends$State[assignment == 1]
-  group2_states <- state_trends$State[assignment == 2]
   
   # Calculate group means
   group1_pre <- mean(state_trends$pre_trend[assignment == 1])
@@ -329,70 +329,141 @@ objective_function <- function(assignment, penalty_weight = 1.0) {
   group1_post <- mean(state_trends$post_trend[assignment == 1])
   group2_post <- mean(state_trends$post_trend[assignment == 2])
   
-  # Objective: maximize post-difference, minimize pre-difference
-  pre_similarity <- -abs(group1_pre - group2_pre)  # Penalty for different pre-trends
-  post_difference <- abs(group1_post - group2_post)  # Reward for different post-trends
+  # Primary objective: minimize pre-trend difference (close x-coordinates)
+  pre_similarity_score <- -abs(group1_pre - group2_pre) * pre_weight
   
-  # Also add within-group cohesion (standard k-means objective)
-  within_group_cohesion <- 0
+  # Secondary objective: maximize post-trend difference (far y-coordinates)  
+  post_separation_score <- abs(group1_post - group2_post) * post_weight
+  
+  # Within-group compactness (standard k-means component)
+  within_group_score <- 0
   for(group in 1:2) {
     group_indices <- which(assignment == group)
     if(length(group_indices) > 1) {
-      group_pre_var <- var(state_trends$pre_trend[group_indices])
-      group_post_var <- var(state_trends$post_trend[group_indices])
-      within_group_cohesion <- within_group_cohesion - (group_pre_var + group_post_var)
+      # Calculate within-group sum of squared distances in 2D space
+      group_data <- state_trends[group_indices, c("pre_trend", "post_trend")]
+      group_center <- c(mean(group_data$pre_trend), mean(group_data$post_trend))
+      
+      distances_sq <- apply(group_data, 1, function(point) {
+        sum((point - group_center)^2)
+      })
+      within_group_score <- within_group_score - sum(distances_sq)
     }
   }
   
-  total_objective <- post_difference + penalty_weight * pre_similarity + 0.1 * within_group_cohesion
-  return(total_objective)
+  total_score <- pre_similarity_score + post_separation_score + 0.1 * within_group_score
+  return(total_score)
 }
 
-# Step 3: Optimization using multiple approaches
+# Step 3: Enhanced optimization with multiple sophisticated approaches
 set.seed(123)
-
-# Approach 1: Grid search on pre-treatment trend splits
-pre_trend_median <- median(state_trends$pre_trend)
-pre_trend_splits <- quantile(state_trends$pre_trend, probs = seq(0.2, 0.8, 0.1))
 
 best_objective <- -Inf
 best_assignment <- NULL
 best_method <- ""
+n_states <- nrow(state_trends)
 
-# Try median split
-assignment_median <- ifelse(state_trends$pre_trend <= pre_trend_median, 1, 2)
-obj_median <- objective_function(assignment_median)
-if(obj_median > best_objective) {
-  best_objective <- obj_median
-  best_assignment <- assignment_median
-  best_method <- "Median Split"
-}
+# Approach 1: Post-trend based splitting (directly target y-axis separation)
+post_trend_median <- median(state_trends$post_trend)
+post_splits <- quantile(state_trends$post_trend, probs = seq(0.3, 0.7, 0.1))
 
-# Try different quantile splits
-for(i in 1:length(pre_trend_splits)) {
-  assignment_quant <- ifelse(state_trends$pre_trend <= pre_trend_splits[i], 1, 2)
-  obj_quant <- objective_function(assignment_quant)
-  if(obj_quant > best_objective) {
-    best_objective <- obj_quant
-    best_assignment <- assignment_quant
-    best_method <- paste("Quantile", round(0.2 + 0.1*i, 1), "Split")
+for(i in 1:length(post_splits)) {
+  assignment_post <- ifelse(state_trends$post_trend <= post_splits[i], 1, 2)
+  if(min(table(assignment_post)) >= min_group_size) {
+    obj_post <- constrained_kmeans_objective(assignment_post)
+    if(obj_post > best_objective) {
+      best_objective <- obj_post
+      best_assignment <- assignment_post
+      best_method <- paste("Post-trend Split", round(0.3 + 0.1*i, 1))
+    }
   }
 }
 
-# Approach 2: Random search for better solutions
-for(iter in 1:100) {
-  # Random assignment ensuring balanced groups
-  n_states <- nrow(state_trends)
-  group1_size <- sample(min_group_size:(n_states-min_group_size), 1)  # Ensure both groups have min_group_size+ states
-  random_assignment <- rep(2, n_states)
-  random_assignment[sample(n_states, group1_size)] <- 1
+# Approach 2: Iterative k-means with constraints
+# Start with post-trend split and iteratively improve
+for(start_split in c(0.4, 0.5, 0.6)) {
+  current_assignment <- ifelse(state_trends$post_trend <= quantile(state_trends$post_trend, start_split), 1, 2)
   
-  obj_random <- objective_function(random_assignment)
-  if(obj_random > best_objective) {
-    best_objective <- obj_random
-    best_assignment <- random_assignment
-    best_method <- paste("Random Search Iter", iter)
+  if(min(table(current_assignment)) >= min_group_size) {
+    improved <- TRUE
+    iteration <- 0
+    
+    while(improved && iteration < 10) {
+      improved <- FALSE
+      iteration <- iteration + 1
+      
+      # Try moving each state to the other group
+      for(state_idx in 1:n_states) {
+        original_group <- current_assignment[state_idx]
+        other_group <- 3 - original_group  # Switch between 1 and 2
+        
+        # Check if we can move this state without violating min_group_size
+        if(sum(current_assignment == original_group) > min_group_size) {
+          # Try the move
+          test_assignment <- current_assignment
+          test_assignment[state_idx] <- other_group
+          
+          test_obj <- constrained_kmeans_objective(test_assignment)
+          if(test_obj > constrained_kmeans_objective(current_assignment)) {
+            current_assignment <- test_assignment
+            improved <- TRUE
+          }
+        }
+      }
+    }
+    
+    final_obj <- constrained_kmeans_objective(current_assignment)
+    if(final_obj > best_objective) {
+      best_objective <- final_obj
+      best_assignment <- current_assignment
+      best_method <- paste("Iterative K-means from", start_split, "split")
+    }
   }
+}
+
+# Approach 3: Simulated annealing for global optimization
+temperature <- 1.0
+cooling_rate <- 0.995
+min_temp <- 0.01
+
+# Start with best solution so far
+current_assignment <- if(is.null(best_assignment)) {
+  ifelse(state_trends$post_trend <= median(state_trends$post_trend), 1, 2)
+} else {
+  best_assignment
+}
+
+current_obj <- constrained_kmeans_objective(current_assignment)
+
+while(temperature > min_temp) {
+  # Generate neighbor by randomly swapping one state
+  neighbor_assignment <- current_assignment
+  
+  # Pick a random state to potentially move
+  state_to_move <- sample(n_states, 1)
+  original_group <- neighbor_assignment[state_to_move]
+  other_group <- 3 - original_group
+  
+  # Check if move is valid (maintains min_group_size)
+  if(sum(neighbor_assignment == original_group) > min_group_size) {
+    neighbor_assignment[state_to_move] <- other_group
+    neighbor_obj <- constrained_kmeans_objective(neighbor_assignment)
+    
+    # Accept move based on simulated annealing criteria
+    delta <- neighbor_obj - current_obj
+    if(delta > 0 || runif(1) < exp(delta / temperature)) {
+      current_assignment <- neighbor_assignment
+      current_obj <- neighbor_obj
+      
+      if(current_obj > best_objective) {
+        best_objective <- current_obj
+        best_assignment <- current_assignment
+        best_method <- "Simulated Annealing"
+      }
+    }
+  }
+  
+  temperature <- temperature * cooling_rate
 }
 
 # Step 4: Analyze the best solution
@@ -654,6 +725,6 @@ modelsummary(models_list_optimal,
 
 Neat! Smaller effect, but much cleaner pre-trend, so rather convincing robustness check eh? The issue with this sentiment begins, however, with the fact that in this optimal matching, California falls in the *non-treated* group. That is to say, we found a statistically significant effect of -1.8% on core deposits to total liabilities after the silicon valley bank crisis for the following states:
 
-![](images/MapChart_Map.png)
+![](images/MapChart_Map(3)-01.png)
 
 The issues never end though, because no matter what size group you try, or whether you take california in or out, or even move the crash date around, there are always statistically significant results with seemingly odd and not very consistent groups of states. This is very clearly a nest of spurious correlations, and points rather squarely at the conclusion that the crash of Silicon Valley Bank, *when look at through this set of data, which is quarterly*, had no real effect on banking across states.
