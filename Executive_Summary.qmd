@@ -27,19 +27,19 @@ Table showing parallel trend assumption below. Lines moving parallel before cras
 # Edit these parameters to control the entire analysis
 
 # Variable for analysis (both clustering and regression)
-analysis_variable <- "Equity Capital to Total Assets - All Institutions"  # Main variable of interest
+analysis_variable <- "Cost of Funding Earning Assets - All Institutions"  # Main variable of interest
 # Other options: "Equity Capital to Total Assets - All Institutions", 
 #                "Net Loans & Leases to Total Assets - All Institutions",
 #                "Cost of Funding Earning Assets - All Institutions", etc.
 
 # States to include/exclude
-include_california <- FALSE  # Include California in clustering and analysis
-exclude_states <- c("Nevada")  # List of states to remove entirely
+include_california <- TRUE  # Include California in clustering and analysis
+exclude_states <- c("South Carolina","Tennessee")  # List of states to remove entirely
 # Example: c("Nevada", "Delaware", "South Dakota") for multiple states
 
 # Clustering configuration
-include_california_in_clustering <- FALSE  # Include CA in the clustering algorithm itself
-clustering_variable <- "Equity Capital to Total Assets - All Institutions"  # Variable used for k-means clustering
+include_california_in_clustering <- TRUE  # Include CA in the clustering algorithm itself
+clustering_variable <- "Cost of Funding Earning Assets - All Institutions"  # Variable used for k-means clustering
 # Can be different from analysis_variable if desired
 
 print("=== ANALYSIS CONFIGURATION ===")
@@ -166,6 +166,8 @@ ggplot(data = diff_data, aes(x = Date, y = Difference_in_Differences)) +
 ## K-Means Clustering Analysis
 
 Instead of using geographic groupings, let's see what happens if we group states based on their banking characteristics using k-means clustering. This data-driven approach might reveal more economically meaningful groupings.
+
+**Note**: We'll also test an optimal matching approach that specifically optimizes for parallel pre-trends and maximized post-treatment differences.
 
 ```{r}
 #| warning: false
@@ -301,9 +303,243 @@ ggplot(data = diff_data_kmeans, aes(x = Date, y = Difference_in_Differences)) +
   theme_minimal()
 ```
 
+## Optimal Matching Approach
+
+Now let's implement your proposed method: finding two groups that have similar pre-treatment trends but maximally different post-treatment responses.
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+print("=== OPTIMAL MATCHING APPROACH ===")
+
+# Step 1: Calculate pre and post-treatment trends for each state
+crash_date <- as.Date("2023-03-31")
+
+state_trends <- lbank %>%
+  group_by(State) %>%
+  arrange(Date) %>%
+  mutate(
+    period_change = get(analysis_variable) - lag(get(analysis_variable)),
+    is_pre = Date < crash_date,
+    is_post = Date >= crash_date
+  ) %>%
+  filter(!is.na(period_change)) %>%
+  summarize(
+    pre_trend = mean(period_change[is_pre], na.rm = TRUE),
+    post_trend = mean(period_change[is_post], na.rm = TRUE),
+    pre_volatility = sd(period_change[is_pre], na.rm = TRUE),
+    post_volatility = sd(period_change[is_post], na.rm = TRUE),
+    n_pre_obs = sum(is_pre),
+    n_post_obs = sum(is_post)
+  ) %>%
+  filter(n_pre_obs >= 2 & n_post_obs >= 2) %>%  # Ensure sufficient data
+  ungroup()
+
+print(paste("States with sufficient data:", nrow(state_trends)))
+print("Summary of pre-treatment trends:")
+print(summary(state_trends$pre_trend))
+print("Summary of post-treatment trends:")
+print(summary(state_trends$post_trend))
+
+# Step 2: Define the objective function
+# We want to maximize: post_difference - penalty * pre_difference
+objective_function <- function(assignment, penalty_weight = 1.0) {
+  if(length(unique(assignment)) != 2 || min(table(assignment)) < 5) {
+    return(-Inf)  # Ensure both groups have at least 5 states
+  }
+  
+  group1_states <- state_trends$State[assignment == 1]
+  group2_states <- state_trends$State[assignment == 2]
+  
+  # Calculate group means
+  group1_pre <- mean(state_trends$pre_trend[assignment == 1])
+  group2_pre <- mean(state_trends$pre_trend[assignment == 2])
+  group1_post <- mean(state_trends$post_trend[assignment == 1])
+  group2_post <- mean(state_trends$post_trend[assignment == 2])
+  
+  # Objective: maximize post-difference, minimize pre-difference
+  pre_similarity <- -abs(group1_pre - group2_pre)  # Penalty for different pre-trends
+  post_difference <- abs(group1_post - group2_post)  # Reward for different post-trends
+  
+  # Also add within-group cohesion (standard k-means objective)
+  within_group_cohesion <- 0
+  for(group in 1:2) {
+    group_indices <- which(assignment == group)
+    if(length(group_indices) > 1) {
+      group_pre_var <- var(state_trends$pre_trend[group_indices])
+      group_post_var <- var(state_trends$post_trend[group_indices])
+      within_group_cohesion <- within_group_cohesion - (group_pre_var + group_post_var)
+    }
+  }
+  
+  total_objective <- post_difference + penalty_weight * pre_similarity + 0.1 * within_group_cohesion
+  return(total_objective)
+}
+
+# Step 3: Optimization using multiple approaches
+set.seed(123)
+
+# Approach 1: Grid search on pre-treatment trend splits
+pre_trend_median <- median(state_trends$pre_trend)
+pre_trend_splits <- quantile(state_trends$pre_trend, probs = seq(0.2, 0.8, 0.1))
+
+best_objective <- -Inf
+best_assignment <- NULL
+best_method <- ""
+
+# Try median split
+assignment_median <- ifelse(state_trends$pre_trend <= pre_trend_median, 1, 2)
+obj_median <- objective_function(assignment_median)
+if(obj_median > best_objective) {
+  best_objective <- obj_median
+  best_assignment <- assignment_median
+  best_method <- "Median Split"
+}
+
+# Try different quantile splits
+for(i in 1:length(pre_trend_splits)) {
+  assignment_quant <- ifelse(state_trends$pre_trend <= pre_trend_splits[i], 1, 2)
+  obj_quant <- objective_function(assignment_quant)
+  if(obj_quant > best_objective) {
+    best_objective <- obj_quant
+    best_assignment <- assignment_quant
+    best_method <- paste("Quantile", round(0.2 + 0.1*i, 1), "Split")
+  }
+}
+
+# Approach 2: Random search for better solutions
+for(iter in 1:100) {
+  # Random assignment ensuring balanced groups
+  n_states <- nrow(state_trends)
+  group1_size <- sample(10:(n_states-10), 1)  # Ensure both groups have 10+ states
+  random_assignment <- rep(2, n_states)
+  random_assignment[sample(n_states, group1_size)] <- 1
+  
+  obj_random <- objective_function(random_assignment)
+  if(obj_random > best_objective) {
+    best_objective <- obj_random
+    best_assignment <- random_assignment
+    best_method <- paste("Random Search Iter", iter)
+  }
+}
+
+# Step 4: Analyze the best solution
+state_trends$optimal_cluster <- best_assignment
+state_trends$optimal_cluster_name <- paste("Optimal Group", best_assignment)
+
+print(paste("Best method:", best_method))
+print(paste("Best objective value:", round(best_objective, 4)))
+
+# Group characteristics
+optimal_summary <- state_trends %>%
+  group_by(optimal_cluster_name) %>%
+  summarize(
+    n_states = n(),
+    mean_pre_trend = round(mean(pre_trend), 4),
+    mean_post_trend = round(mean(post_trend), 4),
+    sd_pre_trend = round(sd(pre_trend), 4),
+    sd_post_trend = round(sd(post_trend), 4)
+  )
+
+print("Optimal grouping characteristics:")
+print(optimal_summary)
+
+# Calculate the key metrics
+group1_pre <- mean(state_trends$pre_trend[best_assignment == 1])
+group2_pre <- mean(state_trends$pre_trend[best_assignment == 2])
+group1_post <- mean(state_trends$post_trend[best_assignment == 1])
+group2_post <- mean(state_trends$post_trend[best_assignment == 2])
+
+print(paste("Pre-treatment difference:", round(abs(group1_pre - group2_pre), 4)))
+print(paste("Post-treatment difference:", round(abs(group1_post - group2_post), 4)))
+
+# Show state assignments
+print("State assignments:")
+assignments_table <- state_trends %>%
+  arrange(optimal_cluster, State) %>%
+  select(State, optimal_cluster_name, pre_trend, post_trend)
+print(assignments_table)
+```
+
+Now let's run the difference-in-differences analysis using these optimally matched groups:
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Create analysis using optimal groups
+lbank_optimal <- lbank %>%
+  left_join(state_trends %>% select(State, optimal_cluster), by = "State") %>%
+  filter(!is.na(optimal_cluster)) %>%
+  mutate(optimal_cluster_name = paste("Optimal Group", optimal_cluster))
+
+# Calculate averages for optimal groups
+avg_deposits_optimal <- lbank_optimal %>%
+  group_by(Date, optimal_cluster_name) %>%
+  summarize(avg_analysis_var = mean(get(analysis_variable), na.rm = TRUE)) %>%
+  ungroup()
+
+# Create levels plot
+ggplot(data = avg_deposits_optimal, aes(x = Date, y = avg_analysis_var, color = optimal_cluster_name)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = crash_date, color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("Optimal Matching Analysis:", analysis_variable),
+       subtitle = "Groups Optimized for Parallel Pre-Trends & Maximal Post-Differences",
+       x = "Date",
+       y = paste(analysis_variable, "(log)"),
+       color = "Group") + 
+  annotate("text", 
+           x = crash_date, 
+           y = min(avg_deposits_optimal$avg_analysis_var) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+
+# Create diff-in-diff plot
+wide_data_optimal <- avg_deposits_optimal %>%
+  pivot_wider(names_from = optimal_cluster_name, values_from = avg_analysis_var) %>%
+  arrange(Date)
+
+optimal_cols <- names(wide_data_optimal)[names(wide_data_optimal) != "Date"]
+group1_name_opt <- optimal_cols[1]
+group2_name_opt <- optimal_cols[2]
+
+diff_data_optimal <- wide_data_optimal %>%
+  mutate(
+    Group1_Change = get(group1_name_opt) - lag(get(group1_name_opt)),
+    Group2_Change = get(group2_name_opt) - lag(get(group2_name_opt)),
+    Difference_in_Differences = Group1_Change - Group2_Change
+  ) %>%
+  filter(!is.na(Group1_Change))
+
+ggplot(data = diff_data_optimal, aes(x = Date, y = Difference_in_Differences)) +
+  geom_line(size = 1.2, color = "purple") +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", alpha = 0.5) +
+  geom_vline(xintercept = crash_date, color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("Optimal Matching Diff-in-Diff:", analysis_variable),
+       subtitle = paste("Optimized Groups:", group1_name_opt, "vs", group2_name_opt),
+       x = "Date",
+       y = "Difference-in-Differences (log)") +
+  annotate("text", 
+           x = crash_date, 
+           y = max(diff_data_optimal$Difference_in_Differences) - 0.005, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
 ## Regression Analysis
 
-We'll run two sets of regressions to compare the geographic approach vs the k-means clustering approach.
+We'll run three sets of regressions to compare all our approaches: geographic, k-means clustering, and optimal matching.
 
 ### Geographic Approach: Western vs Non-Western States
 
@@ -448,6 +684,81 @@ modelsummary(models_list_kmeans,
              output = "gt") %>% 
   tab_spanner(
     label = paste(analysis_variable, "- K-Means Approach"),
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
+### Optimal Matching Approach
+
+Finally, let's test the regression with our optimally matched groups that were designed to maximize the validity of the diff-in-diff design.
+
+```{r}
+#| tbl-cap: "Effect of Silicon Valley Bank Crash using Optimal Matching"
+#| label: tbl-optimal
+#| echo: false
+
+# Create optimal matching treatment variable
+# Only include states that were part of the optimal matching
+lbank_reg_optimal <- lbank %>%
+  left_join(state_trends %>% select(State, optimal_cluster), by = "State") %>%
+  filter(!is.na(optimal_cluster)) %>%
+  mutate(
+    optimal_treatment = ifelse(optimal_cluster == 1, 1, 0),
+    optimal_crash = ifelse(optimal_treatment == 1 & post == 1, 1, 0)
+  )
+
+# Create time fixed effects for optimal regression too
+lbank_reg_optimal$year <- as.numeric(format(lbank_reg_optimal$Date, "%Y"))
+lbank_reg_optimal$quarter <- quarters(lbank_reg_optimal$Date)
+lbank_reg_optimal$year_quarter <- paste(lbank_reg_optimal$year, lbank_reg_optimal$quarter, sep = "_")
+lbank_reg_optimal$year_quarter <- as.factor(lbank_reg_optimal$year_quarter)
+lbank_reg_optimal$State <- as.factor(lbank_reg_optimal$State)
+
+print("=== OPTIMAL MATCHING REGRESSION SETUP ===")
+print(paste("Optimal Group 1 states:", sum(lbank_reg_optimal$optimal_treatment == 1 & !duplicated(lbank_reg_optimal$State))))
+print(paste("Optimal Group 2 states:", sum(lbank_reg_optimal$optimal_treatment == 0 & !duplicated(lbank_reg_optimal$State))))
+
+# Create formulas for optimal matching approach (using same global analysis_variable)
+base_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash", sep=""))
+state_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash + State", sep=""))
+time_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash + year_quarter", sep=""))
+full_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash + State + year_quarter", sep=""))
+
+# Create optimal matching models
+model1_optimal <- lm_robust(base_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+model2_optimal <- lm_robust(state_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+model3_optimal <- lm_robust(time_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+model4_optimal <- lm_robust(full_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+
+# Create list of optimal matching models
+models_list_optimal <- list(
+  "(1)" = model1_optimal,
+  "(2)" = model2_optimal,
+  "(3)" = model3_optimal,
+  "(4)" = model4_optimal
+)
+
+modelsummary(models_list_optimal,
+             title = paste("Effect of Silicon Valley Bank Crash on", analysis_variable, "- Optimal Matching"),
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("optimal_crash" = "Optimal Groups Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|year_quarter",
+             fmt = "%.3f", 
+             notes = "Robust standard errors in parenthesis. Groups optimized for parallel pre-trends.",
+             add_rows = tribble(
+               ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE",    "No",    "Yes",   "No",    "Yes",
+               "Quarter FE",  "No",    "No",    "Yes",   "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = paste(analysis_variable, "- Optimal Matching"),
     columns = everything()
   ) %>% 
   tab_options(
