@@ -184,7 +184,7 @@ ggplot(data = diff_data, aes(x = Date, y = Difference_in_Differences)) +
 
 ## Regression Results
 
-Finally we reach our regression. With four models displaying the different combination of fixed effects. We see statistical significance almost across the board except for dropping out when quarter fixed effects are turned on and state fixed effects are turned off. So this feels like a good sign! The toughest model to pass, with both fixed effects turned on, yielded a 5.5% impact on the treated group when compared with the non-treated group and controlling for differences across state and across time.
+Finally we reach our regression. With four models displaying the different combination of fixed effects. We see statistical significance almost across the board except for dropping out when quarter fixed effects are turned on and state fixed effects are turned off. So this feels like a good sign! The toughest model to pass, with both fixed effects turned on, yielded a -6.2% impact on the treated group when compared with the non-treated group and controlling for differences across state and across time.
 
 ```{r}
 #| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
@@ -593,4 +593,4 @@ Neat! Smaller effect, but much cleaner pre-trend, so rather convincing robustnes
 
 ![](images/MapChart_Map.png)
 
-The issues never end though, because no matter what size group you try, or whether you take california in or out, or even move the crash date around, there are always statistically significant results with seemingly odd and not very consistent groups of states. This is very clearly a nest of spurious correlations, and points rather squarely at the conclusion that the crash of Silicon Valley Bank had no outsized effects on other state's banking situation.
+The issues never end though, because no matter what size group you try, or whether you take california in or out, or even move the crash date around, there are always statistically significant results with seemingly odd and not very consistent groups of states. This is very clearly a nest of spurious correlations, and points rather squarely at the conclusion that the crash of Silicon Valley Bank, *when look at through this set of data, which is quarterly*, had no real effect on banking across states.
