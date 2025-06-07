@@ -50,7 +50,7 @@ clustering_variable <- "Core Deposits to Total Liabilities - All Institutions"  
 # Can be different from analysis_variable if desired
 
 # Treatment timing
-crash_date <- as.Date("2023-3-31")  # Silicon Valley Bank crash date
+crash_date <- as.Date("2023-03-31")  # Silicon Valley Bank crash date
 # Alternative dates for testing: "2020-03-31", "2021-03-31", "2022-03-31", "2024-03-31"
 
 # Optimal matching parameters
@@ -431,6 +431,69 @@ assignments_table <- state_trends %>%
   arrange(optimal_cluster, State) %>%
   select(State, optimal_cluster_name, pre_trend, post_trend)
 #print(assignments_table)
+
+# Create scatter plot of states in differential space
+# Calculate cluster means for plotting
+cluster_means <- state_trends %>%
+  group_by(optimal_cluster) %>%
+  summarize(
+    mean_pre_trend = mean(pre_trend),
+    mean_post_trend = mean(post_trend)
+  ) %>%
+  mutate(optimal_cluster_name = paste("Optimal Group", optimal_cluster))
+
+# Define colors for the groups
+group_colors <- c("Optimal Group 1" = "#E69F00", "Optimal Group 2" = "#56B4E9")
+
+ggplot(state_trends, aes(x = pre_trend, y = post_trend, color = optimal_cluster_name)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_point(data = cluster_means, aes(x = mean_pre_trend, y = mean_post_trend, color = optimal_cluster_name), 
+             size = 6, shape = 17) +
+  scale_color_manual(values = group_colors) +
+  labs(title = "State Positions in Differential Space",
+       subtitle = "Each point represents a state's average change before (x) and after (y) the SVB crash\nTriangles show optimal cluster means",
+       x = "Average Change Before Event (Pre-Trend)",
+       y = "Average Change After Event (Post-Trend)",
+       color = "Group Assignment") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
+
+# Create comparison chart with geographic groupings
+# Add geographic grouping to state_trends data
+state_trends_geo <- state_trends %>%
+  mutate(
+    geographic_group = ifelse(State %in% west_states, "Western States", "Non-Western States")
+  )
+
+# Calculate geographic group means
+geo_means <- state_trends_geo %>%
+  group_by(geographic_group) %>%
+  summarize(
+    mean_pre_trend = mean(pre_trend),
+    mean_post_trend = mean(post_trend)
+  )
+
+# Define colors for geographic groups
+geo_colors <- c("Western States" = "#D55E00", "Non-Western States" = "#009E73")
+
+ggplot(state_trends_geo, aes(x = pre_trend, y = post_trend, color = geographic_group)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_point(data = geo_means, aes(x = mean_pre_trend, y = mean_post_trend, color = geographic_group), 
+             size = 6, shape = 17) +
+  scale_color_manual(values = geo_colors) +
+  labs(title = "State Positions in Differential Space (Geographic Grouping)",
+       subtitle = "Comparison showing geographic grouping vs optimal matching\nTriangles show geographic group means",
+       x = "Average Change Before Event (Pre-Trend)",
+       y = "Average Change After Event (Post-Trend)",
+       color = "Geographic Group") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
 ```
 
 Here we can see the first fruits of our labor, a two line graph illustrating the pre-trend and post-trend moves of our new optimal groups.
