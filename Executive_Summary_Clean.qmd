@@ -42,12 +42,12 @@ analysis_variable <- "Core Deposits to Total Liabilities - All Institutions"  # 
 #                "Cost of Funding Earning Assets - All Institutions", etc.
 
 # States to include/exclude
-include_california <- TRUE  # Include California in clustering and analysis
+include_california <- FALSE  # Include California in clustering and analysis
 exclude_states <- c("Nevada")  # List of states to remove entirely
 # Example: c("Nevada", "Delaware", "South Dakota") for multiple states
 
 # Clustering configuration
-include_california_in_clustering <- TRUE  # Include CA in the clustering algorithm itself
+include_california_in_clustering <- FALSE     # Include CA in the clustering algorithm itself
 clustering_variable <- "Core Deposits to Total Liabilities - All Institutions"  # Variable used for k-means clustering
 # Can be different from analysis_variable if desired
 
@@ -56,7 +56,7 @@ crash_date <- as.Date("2023-03-31")  # Silicon Valley Bank crash date
 # Alternative dates for testing: "2020-03-31", "2021-03-31", "2022-03-31", "2024-03-31"
 
 # Optimal matching parameters
-min_group_size <- 15  # Minimum states per group in optimal matching
+min_group_size <- 2  # Minimum states per group in optimal matching
 # Try different sizes: 5, 8, 10, 15, 20 to test sensitivity
 
 #print("=== ANALYSIS CONFIGURATION ===")
@@ -103,9 +103,9 @@ lbank$State <- droplevels(lbank$State)  # Remove unused factor levels from exclu
 
 # Create geographic groupings (conditional on California inclusion)
 if(include_california) {
-  west_states <- c("California", "Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico")
+  west_states <- c("California", "Oregon", "Arizona", "Washington", "Wyoming")
 } else {
-  west_states <- c("Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico")
+  west_states <- c("Oregon", "Arizona", "Washington", "Wyoming")
 }
 
 lbank$west <- ifelse(lbank$State %in% west_states, 1, 0)
