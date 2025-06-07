@@ -1,0 +1,778 @@
+---
+title: "Some fun creative title"
+author: "Tony Segal, Agustin Fitipaldi, Andrew Reilly, Elijah Stevenson"
+date: "June 5, 2025"
+format: pdf
+---
+
+# Executive Summary
+
+yap here ...
+
+specification below ...
+
+$$
+\text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
+$$
+Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is 1 if state i is on the west coast after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects. 
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# ========================== GLOBAL CONFIGURATION ==========================
+# Edit these parameters to control the entire analysis
+
+# Variable for analysis (both clustering and regression)
+analysis_variable <- "Core Deposits to Total Liabilities - All Institutions"  # Main variable of interest
+# Other options: "Equity Capital to Total Assets - All Institutions", 
+#                "Net Loans & Leases to Total Assets - All Institutions",
+#                "Cost of Funding Earning Assets - All Institutions", etc.
+
+# States to include/exclude
+include_california <- FALSE  # Include California in clustering and analysis
+exclude_states <- c("Nevada")  # List of states to remove entirely
+# Example: c("Nevada", "Delaware", "South Dakota") for multiple states
+
+# Clustering configuration
+include_california_in_clustering <- FALSE  # Include CA in the clustering algorithm itself
+clustering_variable <- "Core Deposits to Total Liabilities - All Institutions"  # Variable used for k-means clustering
+# Can be different from analysis_variable if desired
+
+print("=== ANALYSIS CONFIGURATION ===")
+print(paste("Analysis variable:", analysis_variable))
+print(paste("Clustering variable:", clustering_variable))
+print(paste("Include California:", include_california))
+print(paste("Include CA in clustering:", include_california_in_clustering))
+print(paste("Excluded states:", paste(exclude_states, collapse = ", ")))
+print("===============================")
+
+# ========================== DATA LOADING AND SETUP ==========================
+
+library(dplyr)
+library(readr)
+library(gt)
+library(ggplot2)
+library(estimatr)
+library(modelsummary)
+library(tidyr)
+library(cluster)
+
+lbank <- read_csv("combined_fdic_data_log.csv")
+
+#names(lbank)[10] <- "core_deposit"
+lbank$State <- as.factor(lbank$State)
+#lbank$core_deposit <- as.numeric(lbank$core_deposit)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+# Apply global filtering
+lbank <- lbank %>%
+  filter(!State %in% exclude_states) %>%
+  {if(!include_california) filter(., State != "California") else .}
+
+# Ensure data types are correct after filtering
+lbank$Date <- as.Date(lbank$Date)  # Ensure Date remains Date type after filtering
+lbank$State <- droplevels(lbank$State)  # Remove unused factor levels from excluded states
+```
+
+# Approach 1: Geographic Analysis
+
+## Western vs Non-Western States
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Create geographic groupings (conditional on California inclusion)
+if(include_california) {
+  west_states <- c("California", "Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico")
+} else {
+  west_states <- c("Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico")
+}
+
+lbank$west <- ifelse(lbank$State %in% west_states, 1, 0)
+lbank$year <- format(lbank$Date, "%Y")
+lbank$post <- ifelse(lbank$Date >= as.Date("2023-03-31"), 1, 0)
+lbank$post <- as.factor(lbank$post)
+lbank$west <- as.factor(lbank$west)
+
+# Calculate averages for Western and non-Western states using the analysis variable
+avg_deposits <- lbank %>%
+  group_by(Date, west) %>%
+  summarize(avg_analysis_var = mean(get(analysis_variable), na.rm = TRUE)) %>%
+  mutate(Region = ifelse(west == 1, "Western States", "Non-Western States"))
+
+# Create single plot with averages
+ggplot(data = avg_deposits,
+       aes(x = Date, y = avg_analysis_var, color = Region)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("Geographic Analysis:", analysis_variable),
+       subtitle = "Western vs Non-Western States",
+       x = "Date",
+       y = paste(analysis_variable, "(log)"),
+       color = "Region") + 
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = min(avg_deposits$avg_analysis_var) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
+## Geographic Differences-in-Differences
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Calculate difference-in-differences: (change in western) - (change in non-western)
+wide_data <- avg_deposits %>%
+  ungroup() %>%  # This is the key - remove any grouping from earlier operations
+  select(Date, Region, avg_analysis_var) %>%
+  pivot_wider(names_from = Region, values_from = avg_analysis_var) %>%
+  arrange(Date)
+
+# Then calculate changes and difference-in-differences using lag
+diff_data <- wide_data %>%
+  mutate(
+    Western_Change = `Western States` - lag(`Western States`),
+    NonWestern_Change = `Non-Western States` - lag(`Non-Western States`),
+    Difference_in_Differences = Western_Change - NonWestern_Change
+  ) %>%
+  filter(!is.na(Western_Change))  # Remove first row with NA
+
+# Create differences-in-differences plot
+ggplot(data = diff_data, aes(x = Date, y = Difference_in_Differences)) +
+  geom_line(size = 1.2, color = "darkblue") +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", alpha = 0.5) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("Geographic Diff-in-Diff:", analysis_variable),
+       subtitle = paste("Change in", analysis_variable, ": (Western Change) - (Non-Western Change)"),
+       x = "Date",
+       y = "Difference-in-Differences (log)") +
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = max(diff_data$Difference_in_Differences) - 0.005, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
+## Geographic Regression Results
+
+```{r}
+#| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
+#| label: tbl-geographic
+#| echo: false
+
+# Use global configuration for regression analysis
+print("=== GEOGRAPHIC REGRESSION ANALYSIS ===")
+print(paste("Dependent variable:", analysis_variable))
+print(paste("States included:", nrow(lbank %>% distinct(State))))
+
+lbank$crash <- ifelse(lbank$west == 1 & lbank$post == 1, 1, 0)
+
+# Create more appropriate time fixed effects for quarterly data
+lbank$year <- as.numeric(format(lbank$Date, "%Y"))
+lbank$quarter <- quarters(lbank$Date)
+lbank$year_quarter <- paste(lbank$year, lbank$quarter, sep = "_")
+lbank$year_quarter <- as.factor(lbank$year_quarter)
+lbank$State <- as.factor(lbank$State)
+
+print("Treatment variable check:")
+print(paste("Crash observations:", sum(lbank$crash)))
+print(paste("Post-treatment periods:", length(unique(lbank$Date[lbank$post == 1]))))
+print(paste("Western states:", length(unique(lbank$State[lbank$west == 1]))))
+
+# Create formula dynamically based on analysis_variable
+# Use year-quarter fixed effects instead of date fixed effects for cleaner quarterly identification
+base_formula <- as.formula(paste("`", analysis_variable, "` ~ crash", sep=""))
+state_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + State", sep=""))
+time_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + year_quarter", sep=""))
+full_formula <- as.formula(paste("`", analysis_variable, "` ~ crash + State + year_quarter", sep=""))
+
+#create 4 different models using the analysis variable
+model1 <- lm_robust(base_formula, data = lbank, se_type = "HC1")
+model2 <- lm_robust(state_formula, data = lbank, se_type = "HC1")
+model3 <- lm_robust(time_formula, data = lbank, se_type = "HC1")
+model4 <- lm_robust(full_formula, data = lbank, se_type = "HC1")
+
+#create list of models
+models_list <- list(
+  "(1)" = model1,
+  "(2)" = model2,
+  "(3)" = model3,
+  "(4)" = model4
+)
+
+modelsummary(models_list,
+             title = paste("Effect of Silicon Valley Bank Crash on", analysis_variable),
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("crash" = "Bank Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|year_quarter",
+             fmt = "%.3f", 
+             notes = "Robust standard errors in parenthesis.",
+             add_rows = tribble(
+               ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE",    "No",    "Yes",   "No",    "Yes",
+               "Quarter FE",  "No",    "No",    "Yes",   "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = analysis_variable,
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
+# Approach 2: K-Means Clustering
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Use global configuration parameters
+print("=== K-MEANS CLUSTERING SETUP ===")
+print(paste("Clustering variable:", clustering_variable))
+print(paste("Include CA in clustering:", include_california_in_clustering))
+
+# Prepare clustering data using pre-treatment period (2019-2022)
+cluster_data <- lbank %>%
+  filter(Date < as.Date("2023-01-01")) %>%  # Pre-treatment period
+  {if(!include_california_in_clustering) filter(., State != "California") else .} %>%  # Conditionally remove CA from clustering
+  group_by(State) %>%
+  summarize(
+    clustering_var = mean(get(clustering_variable), na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+print(paste("Number of states in clustering:", nrow(cluster_data)))
+
+# Convert clustering variable to matrix format for k-means
+cluster_vars <- as.matrix(cluster_data$clustering_var)
+
+# Perform k-means clustering with k=2
+set.seed(123)
+kmeans_result <- kmeans(cluster_vars, centers = 2, nstart = 25)
+
+print(paste("K-means clustering with k=2 using", clustering_variable))
+print(table(kmeans_result$cluster))
+
+# Add cluster assignments
+cluster_data$cluster <- kmeans_result$cluster
+cluster_data$cluster_name <- paste("Cluster", cluster_data$cluster)
+
+# Show cluster assignments
+print("K-means cluster assignments:")
+cluster_summary <- cluster_data %>%
+  arrange(cluster, State) %>%
+  select(State, cluster_name, clustering_var)
+print(cluster_summary)
+
+# Check which cluster California is in (if included in clustering)
+if(include_california_in_clustering) {
+  ca_cluster <- cluster_data %>% filter(State == "California") %>% pull(cluster)
+  print(paste("California is in Cluster", ca_cluster))
+} else {
+  print("California was excluded from clustering")
+}
+
+# Show cluster characteristics
+cluster_stats <- cluster_data %>%
+  group_by(cluster_name) %>%
+  summarize(
+    n_states = n(),
+    mean_value = round(mean(clustering_var), 3),
+    min_value = round(min(clustering_var), 3),
+    max_value = round(max(clustering_var), 3)
+  )
+print("Cluster characteristics:")
+print(cluster_stats)
+```
+
+## K-Means Two-Line Analysis
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Create k-means based analysis using the analysis variable
+lbank_kmeans <- lbank %>%
+  left_join(cluster_data %>% select(State, cluster), by = "State") %>%
+  filter(!is.na(cluster)) %>%  # Remove states not in clustering
+  mutate(cluster_name = paste("Cluster", cluster))
+
+# Calculate averages for each cluster using the analysis variable
+avg_deposits_kmeans <- lbank_kmeans %>%
+  group_by(Date, cluster_name) %>%
+  summarize(avg_analysis_var = mean(get(analysis_variable), na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot 1: Two-line chart showing levels (like the geographic chart)
+ggplot(data = avg_deposits_kmeans, aes(x = Date, y = avg_analysis_var, color = cluster_name)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("K-Means Clustering Analysis:", analysis_variable),
+       subtitle = paste("Clustered by", clustering_variable),
+       x = "Date",
+       y = paste(analysis_variable, "(log)"),
+       color = "Cluster") + 
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = min(avg_deposits_kmeans$avg_analysis_var) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
+## K-Means Differences-in-Differences
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Create difference-in-differences for k-means groups
+wide_data_kmeans <- avg_deposits_kmeans %>%
+  pivot_wider(names_from = cluster_name, values_from = avg_analysis_var) %>%
+  arrange(Date)
+
+# Get the cluster names dynamically
+cluster_cols <- names(wide_data_kmeans)[names(wide_data_kmeans) != "Date"]
+cluster1_name <- cluster_cols[1]
+cluster2_name <- cluster_cols[2]
+
+diff_data_kmeans <- wide_data_kmeans %>%
+  mutate(
+    Cluster1_Change = get(cluster1_name) - lag(get(cluster1_name)),
+    Cluster2_Change = get(cluster2_name) - lag(get(cluster2_name)),
+    Difference_in_Differences = Cluster1_Change - Cluster2_Change
+  ) %>%
+  filter(!is.na(Cluster1_Change))
+
+# Plot 2: Difference-in-differences
+ggplot(data = diff_data_kmeans, aes(x = Date, y = Difference_in_Differences)) +
+  geom_line(size = 1.2, color = "darkgreen") +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", alpha = 0.5) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("K-Means Diff-in-Diff:", analysis_variable),
+       subtitle = paste("Clustered by", clustering_variable, ":", cluster1_name, "vs", cluster2_name),
+       x = "Date",
+       y = "Difference-in-Differences (log)") +
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = max(diff_data_kmeans$Difference_in_Differences) - 0.005, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
+## K-Means Regression Results
+
+```{r}
+#| tbl-cap: "Effect of Silicon Valley Bank Crash using K-Means Clusters"
+#| label: tbl-kmeans
+#| echo: false
+
+# Create k-means treatment variable
+lbank_reg_kmeans <- lbank %>%
+  left_join(cluster_data %>% select(State, cluster), by = "State") %>%
+  filter(!is.na(cluster)) %>%  # Only states included in clustering
+  mutate(
+    kmeans_treatment = ifelse(cluster == 1, 1, 0),  # Treat cluster 1 as "treatment"
+    kmeans_crash = ifelse(kmeans_treatment == 1 & post == 1, 1, 0)
+  )
+
+# Create time fixed effects for k-means regression too
+lbank_reg_kmeans$year <- as.numeric(format(lbank_reg_kmeans$Date, "%Y"))
+lbank_reg_kmeans$quarter <- quarters(lbank_reg_kmeans$Date)
+lbank_reg_kmeans$year_quarter <- paste(lbank_reg_kmeans$year, lbank_reg_kmeans$quarter, sep = "_")
+lbank_reg_kmeans$year_quarter <- as.factor(lbank_reg_kmeans$year_quarter)
+lbank_reg_kmeans$State <- as.factor(lbank_reg_kmeans$State)
+
+print("=== K-MEANS REGRESSION SETUP ===")
+print(paste("Cluster 1 states:", sum(lbank_reg_kmeans$kmeans_treatment == 1 & !duplicated(lbank_reg_kmeans$State))))
+print(paste("Cluster 2 states:", sum(lbank_reg_kmeans$kmeans_treatment == 0 & !duplicated(lbank_reg_kmeans$State))))
+
+# Create formulas for k-means approach
+base_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash", sep=""))
+state_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + State", sep=""))
+time_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + year_quarter", sep=""))
+full_formula_kmeans <- as.formula(paste("`", analysis_variable, "` ~ kmeans_crash + State + year_quarter", sep=""))
+
+# Create k-means models
+model1_kmeans <- lm_robust(base_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
+model2_kmeans <- lm_robust(state_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
+model3_kmeans <- lm_robust(time_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
+model4_kmeans <- lm_robust(full_formula_kmeans, data = lbank_reg_kmeans, se_type = "HC1")
+
+# Create list of k-means models
+models_list_kmeans <- list(
+  "(1)" = model1_kmeans,
+  "(2)" = model2_kmeans,
+  "(3)" = model3_kmeans,
+  "(4)" = model4_kmeans
+)
+
+modelsummary(models_list_kmeans,
+             title = paste("Effect of Silicon Valley Bank Crash on", analysis_variable, "- K-Means Clusters"),
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("kmeans_crash" = "K-Means Cluster Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|year_quarter",
+             fmt = "%.3f", 
+             notes = "Robust standard errors in parenthesis. Cluster 1 treated as treatment group.",
+             add_rows = tribble(
+               ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE",    "No",    "Yes",   "No",    "Yes",
+               "Quarter FE",  "No",    "No",    "Yes",   "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = paste(analysis_variable, "- K-Means Approach"),
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
+# Approach 3: Optimal Matching
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+print("=== OPTIMAL MATCHING APPROACH ===")
+
+# Step 1: Calculate pre and post-treatment trends for each state
+crash_date <- as.Date("2023-03-31")
+
+state_trends <- lbank %>%
+  group_by(State) %>%
+  arrange(Date) %>%
+  mutate(
+    period_change = get(analysis_variable) - lag(get(analysis_variable)),
+    is_pre = Date < crash_date,
+    is_post = Date >= crash_date
+  ) %>%
+  filter(!is.na(period_change)) %>%
+  summarize(
+    pre_trend = mean(period_change[is_pre], na.rm = TRUE),
+    post_trend = mean(period_change[is_post], na.rm = TRUE),
+    pre_volatility = sd(period_change[is_pre], na.rm = TRUE),
+    post_volatility = sd(period_change[is_post], na.rm = TRUE),
+    n_pre_obs = sum(is_pre),
+    n_post_obs = sum(is_post)
+  ) %>%
+  filter(n_pre_obs >= 2 & n_post_obs >= 2) %>%  # Ensure sufficient data
+  ungroup()
+
+print(paste("States with sufficient data:", nrow(state_trends)))
+print("Summary of pre-treatment trends:")
+print(summary(state_trends$pre_trend))
+print("Summary of post-treatment trends:")
+print(summary(state_trends$post_trend))
+
+# Step 2: Define the objective function
+objective_function <- function(assignment, penalty_weight = 1.0) {
+  if(length(unique(assignment)) != 2 || min(table(assignment)) < 5) {
+    return(-Inf)  # Ensure both groups have at least 5 states
+  }
+  
+  group1_states <- state_trends$State[assignment == 1]
+  group2_states <- state_trends$State[assignment == 2]
+  
+  # Calculate group means
+  group1_pre <- mean(state_trends$pre_trend[assignment == 1])
+  group2_pre <- mean(state_trends$pre_trend[assignment == 2])
+  group1_post <- mean(state_trends$post_trend[assignment == 1])
+  group2_post <- mean(state_trends$post_trend[assignment == 2])
+  
+  # Objective: maximize post-difference, minimize pre-difference
+  pre_similarity <- -abs(group1_pre - group2_pre)  # Penalty for different pre-trends
+  post_difference <- abs(group1_post - group2_post)  # Reward for different post-trends
+  
+  # Also add within-group cohesion (standard k-means objective)
+  within_group_cohesion <- 0
+  for(group in 1:2) {
+    group_indices <- which(assignment == group)
+    if(length(group_indices) > 1) {
+      group_pre_var <- var(state_trends$pre_trend[group_indices])
+      group_post_var <- var(state_trends$post_trend[group_indices])
+      within_group_cohesion <- within_group_cohesion - (group_pre_var + group_post_var)
+    }
+  }
+  
+  total_objective <- post_difference + penalty_weight * pre_similarity + 0.1 * within_group_cohesion
+  return(total_objective)
+}
+
+# Step 3: Optimization using multiple approaches
+set.seed(123)
+
+# Approach 1: Grid search on pre-treatment trend splits
+pre_trend_median <- median(state_trends$pre_trend)
+pre_trend_splits <- quantile(state_trends$pre_trend, probs = seq(0.2, 0.8, 0.1))
+
+best_objective <- -Inf
+best_assignment <- NULL
+best_method <- ""
+
+# Try median split
+assignment_median <- ifelse(state_trends$pre_trend <= pre_trend_median, 1, 2)
+obj_median <- objective_function(assignment_median)
+if(obj_median > best_objective) {
+  best_objective <- obj_median
+  best_assignment <- assignment_median
+  best_method <- "Median Split"
+}
+
+# Try different quantile splits
+for(i in 1:length(pre_trend_splits)) {
+  assignment_quant <- ifelse(state_trends$pre_trend <= pre_trend_splits[i], 1, 2)
+  obj_quant <- objective_function(assignment_quant)
+  if(obj_quant > best_objective) {
+    best_objective <- obj_quant
+    best_assignment <- assignment_quant
+    best_method <- paste("Quantile", round(0.2 + 0.1*i, 1), "Split")
+  }
+}
+
+# Approach 2: Random search for better solutions
+for(iter in 1:100) {
+  # Random assignment ensuring balanced groups
+  n_states <- nrow(state_trends)
+  group1_size <- sample(10:(n_states-10), 1)  # Ensure both groups have 10+ states
+  random_assignment <- rep(2, n_states)
+  random_assignment[sample(n_states, group1_size)] <- 1
+  
+  obj_random <- objective_function(random_assignment)
+  if(obj_random > best_objective) {
+    best_objective <- obj_random
+    best_assignment <- random_assignment
+    best_method <- paste("Random Search Iter", iter)
+  }
+}
+
+# Step 4: Analyze the best solution
+state_trends$optimal_cluster <- best_assignment
+state_trends$optimal_cluster_name <- paste("Optimal Group", best_assignment)
+
+print(paste("Best method:", best_method))
+print(paste("Best objective value:", round(best_objective, 4)))
+
+# Group characteristics
+optimal_summary <- state_trends %>%
+  group_by(optimal_cluster_name) %>%
+  summarize(
+    n_states = n(),
+    mean_pre_trend = round(mean(pre_trend), 4),
+    mean_post_trend = round(mean(post_trend), 4),
+    sd_pre_trend = round(sd(pre_trend), 4),
+    sd_post_trend = round(sd(post_trend), 4)
+  )
+
+print("Optimal grouping characteristics:")
+print(optimal_summary)
+
+# Calculate the key metrics
+group1_pre <- mean(state_trends$pre_trend[best_assignment == 1])
+group2_pre <- mean(state_trends$pre_trend[best_assignment == 2])
+group1_post <- mean(state_trends$post_trend[best_assignment == 1])
+group2_post <- mean(state_trends$post_trend[best_assignment == 2])
+
+print(paste("Pre-treatment difference:", round(abs(group1_pre - group2_pre), 4)))
+print(paste("Post-treatment difference:", round(abs(group1_post - group2_post), 4)))
+
+# Show state assignments
+print("State assignments:")
+assignments_table <- state_trends %>%
+  arrange(optimal_cluster, State) %>%
+  select(State, optimal_cluster_name, pre_trend, post_trend)
+print(assignments_table)
+```
+
+## Optimal Matching Two-Line Analysis
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Create analysis using optimal groups
+lbank_optimal <- lbank %>%
+  left_join(state_trends %>% select(State, optimal_cluster), by = "State") %>%
+  filter(!is.na(optimal_cluster)) %>%
+  mutate(optimal_cluster_name = paste("Optimal Group", optimal_cluster))
+
+# Calculate averages for optimal groups
+avg_deposits_optimal <- lbank_optimal %>%
+  group_by(Date, optimal_cluster_name) %>%
+  summarize(avg_analysis_var = mean(get(analysis_variable), na.rm = TRUE)) %>%
+  ungroup()
+
+# Create levels plot
+ggplot(data = avg_deposits_optimal, aes(x = Date, y = avg_analysis_var, color = optimal_cluster_name)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = crash_date, color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("Optimal Matching Analysis:", analysis_variable),
+       subtitle = "Groups Optimized for Parallel Pre-Trends & Maximal Post-Differences",
+       x = "Date",
+       y = paste(analysis_variable, "(log)"),
+       color = "Group") + 
+  annotate("text", 
+           x = crash_date, 
+           y = min(avg_deposits_optimal$avg_analysis_var) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
+## Optimal Matching Differences-in-Differences
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Create diff-in-diff plot
+wide_data_optimal <- avg_deposits_optimal %>%
+  pivot_wider(names_from = optimal_cluster_name, values_from = avg_analysis_var) %>%
+  arrange(Date)
+
+optimal_cols <- names(wide_data_optimal)[names(wide_data_optimal) != "Date"]
+group1_name_opt <- optimal_cols[1]
+group2_name_opt <- optimal_cols[2]
+
+diff_data_optimal <- wide_data_optimal %>%
+  mutate(
+    Group1_Change = get(group1_name_opt) - lag(get(group1_name_opt)),
+    Group2_Change = get(group2_name_opt) - lag(get(group2_name_opt)),
+    Difference_in_Differences = Group1_Change - Group2_Change
+  ) %>%
+  filter(!is.na(Group1_Change))
+
+ggplot(data = diff_data_optimal, aes(x = Date, y = Difference_in_Differences)) +
+  geom_line(size = 1.2, color = "purple") +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", alpha = 0.5) +
+  geom_vline(xintercept = crash_date, color = "red", linetype = "dotted", linewidth = 1) +
+  labs(title = paste("Optimal Matching Diff-in-Diff:", analysis_variable),
+       subtitle = paste("Optimized Groups:", group1_name_opt, "vs", group2_name_opt),
+       x = "Date",
+       y = "Difference-in-Differences (log)") +
+  annotate("text", 
+           x = crash_date, 
+           y = max(diff_data_optimal$Difference_in_Differences) - 0.005, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4) +
+  theme_minimal()
+```
+
+## Optimal Matching Regression Results
+
+```{r}
+#| tbl-cap: "Effect of Silicon Valley Bank Crash using Optimal Matching"
+#| label: tbl-optimal
+#| echo: false
+
+# Create optimal matching treatment variable
+lbank_reg_optimal <- lbank %>%
+  left_join(state_trends %>% select(State, optimal_cluster), by = "State") %>%
+  filter(!is.na(optimal_cluster)) %>%
+  mutate(
+    optimal_treatment = ifelse(optimal_cluster == 1, 1, 0),
+    optimal_crash = ifelse(optimal_treatment == 1 & post == 1, 1, 0)
+  )
+
+# Create time fixed effects for optimal regression too
+lbank_reg_optimal$year <- as.numeric(format(lbank_reg_optimal$Date, "%Y"))
+lbank_reg_optimal$quarter <- quarters(lbank_reg_optimal$Date)
+lbank_reg_optimal$year_quarter <- paste(lbank_reg_optimal$year, lbank_reg_optimal$quarter, sep = "_")
+lbank_reg_optimal$year_quarter <- as.factor(lbank_reg_optimal$year_quarter)
+lbank_reg_optimal$State <- as.factor(lbank_reg_optimal$State)
+
+print("=== OPTIMAL MATCHING REGRESSION SETUP ===")
+print(paste("Optimal Group 1 states:", sum(lbank_reg_optimal$optimal_treatment == 1 & !duplicated(lbank_reg_optimal$State))))
+print(paste("Optimal Group 2 states:", sum(lbank_reg_optimal$optimal_treatment == 0 & !duplicated(lbank_reg_optimal$State))))
+
+# Create formulas for optimal matching approach (using same global analysis_variable)
+base_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash", sep=""))
+state_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash + State", sep=""))
+time_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash + year_quarter", sep=""))
+full_formula_optimal <- as.formula(paste("`", analysis_variable, "` ~ optimal_crash + State + year_quarter", sep=""))
+
+# Create optimal matching models
+model1_optimal <- lm_robust(base_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+model2_optimal <- lm_robust(state_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+model3_optimal <- lm_robust(time_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+model4_optimal <- lm_robust(full_formula_optimal, data = lbank_reg_optimal, se_type = "HC1")
+
+# Create list of optimal matching models
+models_list_optimal <- list(
+  "(1)" = model1_optimal,
+  "(2)" = model2_optimal,
+  "(3)" = model3_optimal,
+  "(4)" = model4_optimal
+)
+
+modelsummary(models_list_optimal,
+             title = paste("Effect of Silicon Valley Bank Crash on", analysis_variable, "- Optimal Matching"),
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("optimal_crash" = "Optimal Groups Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|year_quarter",
+             fmt = "%.3f", 
+             notes = "Robust standard errors in parenthesis. Groups optimized for parallel pre-trends.",
+             add_rows = tribble(
+               ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE",    "No",    "Yes",   "No",    "Yes",
+               "Quarter FE",  "No",    "No",    "Yes",   "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = paste(analysis_variable, "- Optimal Matching"),
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
+# Conclusion
+
+Compare the three approaches to see which provides the most convincing causal identification and largest treatment effects.
