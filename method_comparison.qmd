@@ -26,6 +26,8 @@ library(tibble)
 library(cluster)
 library(maps)
 library(mapdata)
+library(plotly)
+library(htmltools)
 
 # Load data
 lbank <- read_csv("combined_fdic_data_log.csv")
@@ -179,7 +181,11 @@ create_plots <- function(analysis_result) {
   scatter_colors <- c("#D55E00", "#009E73")
   names(scatter_colors) <- c(treated_name, "Other States")
   
-  p3 <- ggplot(analysis_result$state_trends, aes(x = pre_trend, y = post_trend, color = group_assignment)) +
+  # Get California data for annotation
+  ca_data <- analysis_result$state_trends[analysis_result$state_trends$State == "California", ]
+  
+  p3 <- ggplot(analysis_result$state_trends, aes(x = pre_trend, y = post_trend, 
+                                               color = group_assignment, text = State)) +
     geom_point(size = 3, alpha = 0.7) +
     scale_color_manual(values = scatter_colors) +
     labs(title = paste(group_name, "Differential Space"),
@@ -190,6 +196,22 @@ create_plots <- function(analysis_result) {
     theme_minimal() +
     geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
     geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
+  
+  # Add California annotation if it exists in the data
+  if(nrow(ca_data) > 0) {
+    # Calculate offset position for label (lower left)
+    x_range <- diff(range(analysis_result$state_trends$pre_trend, na.rm = TRUE))
+    y_range <- diff(range(analysis_result$state_trends$post_trend, na.rm = TRUE))
+    label_x <- ca_data$pre_trend - x_range * 0.15
+    label_y <- ca_data$post_trend - y_range * 0.1
+    
+    p3 <- p3 +
+      annotate("text", x = label_x, y = label_y, label = "California", 
+               size = 3, color = "black", fontface = "bold") +
+      annotate("segment", x = label_x + x_range * 0.05, y = label_y + y_range * 0.03,
+               xend = ca_data$pre_trend - x_range * 0.02, yend = ca_data$post_trend - y_range * 0.02,
+               arrow = arrow(length = unit(0.02, "npc")), color = "black", size = 0.5)
+  }
   
   # 4. Map plot
   # Get US state map data
@@ -208,7 +230,8 @@ create_plots <- function(analysis_result) {
     stringsAsFactors = FALSE
   ) %>%
     mutate(
-      group_assignment = ifelse(State %in% analysis_result$treated_states, treated_name, "Other States"),
+      group_assignment = ifelse(State %in% exclude_states, "Excluded", 
+                               ifelse(State %in% analysis_result$treated_states, treated_name, "Other States")),
       region = tolower(State)
     )
   
@@ -217,8 +240,8 @@ create_plots <- function(analysis_result) {
     left_join(map_assignments, by = "region")
   
   # Define colors for the map (same as other plots)
-  map_colors <- c("#D55E00", "#009E73")
-  names(map_colors) <- c(treated_name, "Other States")
+  map_colors <- c("#D55E00", "#009E73", "lightgray")
+  names(map_colors) <- c(treated_name, "Other States", "Excluded")
   
   # Create the map
   p4 <- ggplot(map_data_with_groups, aes(x = long, y = lat, group = group, fill = group_assignment)) +
@@ -235,6 +258,7 @@ create_plots <- function(analysis_result) {
       legend.position = "bottom"
     )
   
+  # For PDF output, use static ggplot instead of plotly
   return(list(levels = p1, diff_in_diff = p2, scatter = p3, map = p4))
 }
 
@@ -277,7 +301,8 @@ methods <- list(
   "Geographic_Southeast" = c("Florida", "Georgia", "South Carolina", "North Carolina", "Virginia", "Tennessee", "Kentucky", "Alabama", "Mississippi", "Louisiana", "Arkansas"),
   "Geographic_Northeast" = c("Maine", "New Hampshire", "Vermont", "Massachusetts", "Rhode Island", "Connecticut", "New York", "New Jersey", "Pennsylvania","Maryland","West Virginia","Ohio","Virginia"),
   "Tech_Exposure" = c("California", "Connecticut", "Florida", "Illinois", "New York", "North Carolina", "Texas", "Washington", "Colorado", "Utah", "Delaware"),
-  "Bordered_West" = c("California","Washington","Oregon","Arizona")
+  "Bordered_West" = c("California","Washington","Oregon","Arizona"),
+  "Bordered_West_No_Ca" = c("Washington","Oregon","Arizona")
 )
 
 cat("Methods to be tested:\n")
@@ -322,6 +347,8 @@ for(method_name in names(methods)) {
   cat("\n\n")
   print(plots$diff_in_diff)
   cat("\n\n")
+  
+  # For PDF output, use print() for ggplot
   print(plots$scatter)
   cat("\n\n")
   
@@ -405,6 +432,17 @@ if("Bordered_West" %in% names(results)) {
 }
 ```
 
+## Border West Regression Results Minus California
+
+```{r}
+#| tbl-cap: "Effect of SVB Crash: West Border States No California"
+#| label: tbl-border-west-no-ca
+#| echo: false
+
+if("Bordered_West_No_Ca" %in% names(results)) {
+  create_regression_table(results[["Bordered_West_No_Ca"]])
+}
+```
 
 # Comparison Summary
 

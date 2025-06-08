@@ -1,0 +1,496 @@
+---
+title: "State Banking Performance Analysis"
+author: "Analysis Report"
+date: "`r Sys.Date()`"
+format: 
+  html:
+    toc: true
+    code-fold: true
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(plotly)
+library(knitr)
+library(DT)
+library(viridis)
+
+# Global variable for the state to analyze
+COMPARISON_STATE <- "Arizona"
+```
+
+## Overview
+
+This analysis examines `r COMPARISON_STATE`'s banking performance relative to other states across multiple quarters from 2019 to 2023. We calculate `r COMPARISON_STATE`'s percentile ranking for each banking variable to understand how `r COMPARISON_STATE` banks perform compared to the national distribution.
+
+## Data Loading and Preparation
+
+```{r data-loading}
+# Load the combined FDIC data
+data <- read_csv("combined_fdic_data.csv")
+
+# Clean column names by removing special characters and spaces
+clean_names <- function(names) {
+  names %>%
+    str_replace_all("[^A-Za-z0-9_]", "_") %>%
+    str_replace_all("__+", "_") %>%
+    str_remove("^_+|_+$")
+}
+
+names(data) <- clean_names(names(data))
+
+# Convert all columns except Obs, State, Date to numeric
+# First identify which columns should be numeric (all except the first 3)
+cols_to_convert <- names(data)[4:ncol(data)]
+
+# Convert to numeric, handling any parsing issues
+for(col in cols_to_convert) {
+  # Remove any commas, dollar signs, or other formatting
+  data[[col]] <- gsub(",", "", data[[col]])
+  data[[col]] <- gsub("\\$", "", data[[col]])
+  data[[col]] <- gsub("%", "", data[[col]])
+  
+  # Convert to numeric, turning any non-numeric values to NA
+  data[[col]] <- as.numeric(data[[col]])
+}
+
+# Get all numeric columns (excluding Obs, State, Date)
+numeric_cols <- data %>%
+  select(-Obs, -State, -Date) %>%
+  select_if(is.numeric) %>%
+  names()
+
+# Filter for comparison state data
+state_data <- data %>%
+  filter(State == COMPARISON_STATE) %>%
+  arrange(Date)
+
+print(paste("Number of quarters for", COMPARISON_STATE, ":", nrow(state_data)))
+print(paste("Date range:", min(state_data$Date), "to", max(state_data$Date)))
+```
+
+## Percentile Calculation Function
+
+```{r percentile-function}
+# Function to calculate percentile rank for the comparison state in each quarter
+calculate_percentiles <- function(data, state_name) {
+  
+  # Check if the state exists in the data
+  if(!state_name %in% data$State) {
+    return(data.frame(Date = unique(data$Date)))
+  }
+  
+  # Get unique dates
+  dates <- unique(data$Date)
+  
+  # Initialize results dataframe
+  results_list <- list()
+  
+  # For each date, calculate percentiles
+  for(date in dates) {
+    date_data <- data[data$Date == date, ]
+    state_row <- date_data[date_data$State == state_name, ]
+    
+    if(nrow(state_row) == 1) {
+      # Calculate percentiles for each numeric variable
+      percentiles <- sapply(numeric_cols, function(col) {
+        state_value <- state_row[[col]]
+        all_values <- date_data[[col]]
+        
+        if(!is.na(state_value) && sum(!is.na(all_values)) > 1) {
+          # Calculate percentile rank (0-100)
+          percentile_rank <- sum(all_values <= state_value, na.rm = TRUE) / sum(!is.na(all_values)) * 100
+          return(percentile_rank)
+        } else {
+          return(NA_real_)
+        }
+      })
+      
+      # Create row with percentile results
+      result_row <- data.frame(Date = date, t(percentiles))
+      names(result_row)[-1] <- paste0(numeric_cols, "_percentile")
+      results_list[[length(results_list) + 1]] <- result_row
+    }
+  }
+  
+  # Combine all results
+  if(length(results_list) > 0) {
+    percentile_results <- do.call(rbind, results_list)
+  } else {
+    percentile_results <- data.frame(Date = dates)
+  }
+  
+  return(percentile_results)
+}
+
+# Calculate percentiles for the comparison state
+state_percentiles <- calculate_percentiles(data, COMPARISON_STATE)
+
+# Convert Date to proper date format
+state_percentiles$Date <- as.Date(state_percentiles$Date, format = "%m/%d/%Y")
+
+```
+
+## Key Variables Analysis
+
+Let's focus on the most important banking performance indicators:
+
+```{r key-variables}
+percentile_cols <- names(state_percentiles)[grepl("_percentile$", names(state_percentiles))]
+
+if(length(percentile_cols) == 0) {
+  # Use first few columns as fallback
+  key_vars <- names(state_percentiles)[2:min(9, ncol(state_percentiles))]
+} else {
+  # Select key banking performance variables based on actual column names
+  key_vars <- c()
+  
+  # Find Return on Assets
+  roa_col <- grep("Return.*Assets.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(roa_col) > 0) key_vars <- c(key_vars, roa_col[1])
+  
+  # Find Return on Equity  
+  roe_col <- grep("Return.*Equity.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(roe_col) > 0) key_vars <- c(key_vars, roe_col[1])
+  
+  # Find Net Interest Margin
+  nim_col <- grep("Net.*Interest.*Margin.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(nim_col) > 0) key_vars <- c(key_vars, nim_col[1])
+  
+  # Find Equity Capital to Total Assets
+  equity_col <- grep("Equity.*Capital.*Total.*Assets.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(equity_col) > 0) key_vars <- c(key_vars, equity_col[1])
+  
+  # Find Noncurrent Loans
+  noncurrent_col <- grep("Noncurrent.*Loans.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(noncurrent_col) > 0) key_vars <- c(key_vars, noncurrent_col[1])
+  
+  # Find Net Charge Offs
+  chargeoff_col <- grep("Net.*Charge.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(chargeoff_col) > 0) key_vars <- c(key_vars, chargeoff_col[1])
+  
+  # Find Cost of Funding
+  cost_col <- grep("Cost.*Funding.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(cost_col) > 0) key_vars <- c(key_vars, cost_col[1])
+  
+  # Find Leverage Ratio
+  leverage_col <- grep("Leverage.*percentile", percentile_cols, value = TRUE, ignore.case = TRUE)
+  if(length(leverage_col) > 0) key_vars <- c(key_vars, leverage_col[1])
+  
+  # Remove any NA values and ensure we have valid column names
+  key_vars <- key_vars[!is.na(key_vars) & key_vars != ""]
+  key_vars <- unique(key_vars)  # Remove duplicates
+  
+  # If still no key vars found, just take first 8 percentile columns
+  if(length(key_vars) == 0 && length(percentile_cols) > 0) {
+    key_vars <- head(percentile_cols, min(8, length(percentile_cols)))
+  }
+}
+
+# Verify that all key_vars actually exist in the dataframe
+if(length(key_vars) > 0) {
+  key_vars <- key_vars[key_vars %in% names(state_percentiles)]
+}
+
+# Create a long format dataset for plotting (only if we have key_vars)
+if(length(key_vars) > 0) {
+  state_long <- state_percentiles %>%
+    select(Date, all_of(key_vars)) %>%
+    pivot_longer(cols = -Date, names_to = "Variable", values_to = "Percentile") %>%
+    mutate(
+      Variable_Clean = str_remove(Variable, "_percentile") %>%
+        str_replace_all("_", " ") %>%
+        str_replace_all("   ", " - ") %>%
+        str_to_title()
+    )
+} else {
+  state_long <- data.frame(Date = state_percentiles$Date, 
+                          Variable = "No Data", 
+                          Percentile = NA, 
+                          Variable_Clean = "No Data Available")
+}
+
+# Display summary statistics (only if we have data)
+if(length(key_vars) > 0 && nrow(state_long) > 0 && !all(is.na(state_long$Percentile))) {
+  summary_stats <- state_long %>%
+    filter(!is.na(Percentile)) %>%
+    group_by(Variable_Clean) %>%
+    summarise(
+      Mean_Percentile = round(mean(Percentile, na.rm = TRUE), 1),
+      Min_Percentile = round(min(Percentile, na.rm = TRUE), 1),
+      Max_Percentile = round(max(Percentile, na.rm = TRUE), 1),
+      Latest_Percentile = round(last(Percentile[!is.na(Percentile)]), 1),
+      .groups = "drop"
+    )
+  
+  kable(summary_stats, 
+        caption = paste(COMPARISON_STATE, "Banking Performance Percentiles Summary"),
+        col.names = c("Variable", "Mean", "Min", "Max", "Latest"))
+}
+```
+
+## Interactive Line Charts
+
+```{r interactive-plots, fig.height=12}
+# Create individual plots for each key variable (only if we have data)
+if(length(key_vars) > 0) {
+  plot_list <- list()
+  
+  for(var in key_vars) {
+    var_clean <- str_remove(var, "_percentile") %>%
+      str_replace_all("_", " ") %>%
+      str_replace_all("   ", " - ") %>%
+      str_to_title()
+    
+    plot_data <- state_percentiles %>%
+      select(Date, all_of(var)) %>%
+      rename(Percentile = !!var) %>%
+      filter(!is.na(Percentile))
+    
+    if(nrow(plot_data) > 0) {
+      p <- plot_ly(plot_data, x = ~Date, y = ~Percentile, type = 'scatter', mode = 'lines+markers',
+                   name = var_clean, line = list(width = 3), marker = list(size = 6)) %>%
+        layout(
+          title = list(text = paste(COMPARISON_STATE, var_clean, "Percentile Over Time"), 
+                       font = list(size = 14)),
+          xaxis = list(title = "Date"),
+          yaxis = list(title = "Percentile (0-100)", range = c(0, 100)),
+          hovermode = 'x unified',
+          showlegend = FALSE,
+          shapes = list(
+            list(type = "line",
+                 x0 = min(plot_data$Date), x1 = max(plot_data$Date),
+                 y0 = 50, y1 = 50,
+                 line = list(color = "red", dash = "dash", width = 2))
+          )
+        ) %>%
+        add_annotations(
+          x = max(plot_data$Date), y = 10,
+          text = "50th percentile (median)",
+          showarrow = FALSE,
+          font = list(size = 10, color = "red")
+        )
+      
+      plot_list[[var_clean]] <- p
+    }
+  }
+  
+  # Display plots
+  if(length(plot_list) > 0) {
+    for(i in 1:length(plot_list)) {
+      print(plot_list[[i]])
+    }
+  }
+}
+```
+
+## Comprehensive Variable Analysis
+
+```{r all-variables-heatmap, fig.height=30, fig.width=12}
+# Set up the figure output filename with state name
+state_clean <- str_replace_all(tolower(COMPARISON_STATE), " ", "_")
+knitr::opts_chunk$set(fig.path = paste0("figures/", state_clean, "_"))
+```
+
+```{r heatmap-plot, fig.height=30, fig.width=12}
+# Create a heatmap showing all variables over time
+percentile_cols_all <- names(state_percentiles)[grepl("_percentile$", names(state_percentiles))]
+
+if(length(percentile_cols_all) > 0) {
+  all_percentiles_long <- state_percentiles %>%
+    select(Date, all_of(percentile_cols_all)) %>%
+    pivot_longer(cols = -Date, names_to = "Variable", values_to = "Percentile") %>%
+    mutate(
+      Variable_Clean = str_remove(Variable, "_percentile") %>%
+        str_replace_all("_", " ") %>%
+        str_wrap(40)
+    ) %>%
+    filter(!is.na(Percentile))
+  
+  if(nrow(all_percentiles_long) > 0) {
+    # Create quarter labels manually
+    quarter_labels <- function(dates) {
+      quarters <- ceiling(as.numeric(format(dates, "%m")) / 3)
+      years <- format(dates, "%Y")
+      paste0(years, "\nQ", quarters)
+    }
+    
+    # Create heatmap
+    heatmap_plot <- all_percentiles_long %>%
+      ggplot(aes(x = Date, y = Variable_Clean, fill = Percentile)) +
+      geom_tile(color = "white", linewidth = 0.1) +
+      scale_fill_gradient2(low = "red", mid = "yellow", high = "green", 
+                           midpoint = 50, name = "Percentile") +
+      scale_x_date(breaks = unique(all_percentiles_long$Date),
+                   labels = quarter_labels,
+                   expand = c(0, 0)) +
+      scale_y_discrete(expand = c(0, 0)) +
+      theme_minimal() +
+      theme(
+        axis.text.y = element_text(size = 8),
+        axis.text.x = element_text(size = 8, hjust = 0.5, vjust = 0.5),
+        plot.title = element_text(size = 16, hjust = 0.5),
+        panel.grid = element_blank(),
+        axis.ticks.x = element_line(color = "black", linewidth = 0.5),
+        axis.ticks.length.x = unit(0.2, "cm"),
+        plot.margin = margin(10, 10, 50, 10)
+      ) +
+      labs(
+        title = paste(COMPARISON_STATE, "Banking Performance Percentiles Heatmap"),
+        subtitle = "All Variables Across All Quarters (Red = Below Median, Green = Above Median)",
+        x = "Date",
+        y = "Banking Variables"
+      )
+    
+    print(heatmap_plot)
+  }
+}
+```
+
+## Performance Trends by Category
+
+```{r category-analysis}
+# Group variables by category for better analysis using actual column names
+profitability_vars <- c()
+capital_strength_vars <- c()
+asset_quality_vars <- c()
+
+# Find profitability variables
+roa_cols <- grep("Return_on_Assets.*All_Institutions_percentile", percentile_cols, value = TRUE)
+roe_cols <- grep("Return_on_Equity.*All_Institutions_percentile", percentile_cols, value = TRUE)
+nim_cols <- grep("Net_Interest_Margin.*All_Institutions_percentile", percentile_cols, value = TRUE)
+pretax_cols <- grep("Pretax_Return.*All_Institutions_percentile", percentile_cols, value = TRUE)
+profitability_vars <- c(roa_cols, roe_cols, nim_cols, pretax_cols)
+
+# Find capital strength variables
+equity_cols <- grep("Equity_Capital.*Total_Assets.*All_Institutions_percentile", percentile_cols, value = TRUE)
+leverage_cols <- grep("Leverage.*Capital.*All_Institutions_percentile", percentile_cols, value = TRUE)
+risk_capital_cols <- grep("Total_Risk.*Capital.*All_Institutions_percentile", percentile_cols, value = TRUE)
+capital_strength_vars <- c(equity_cols, leverage_cols, risk_capital_cols)
+
+# Find asset quality variables
+noncurrent_cols <- grep("Noncurrent.*Loans.*Total_Loans.*All_Institutions_percentile", percentile_cols, value = TRUE)
+chargeoff_cols <- grep("Net_Charge.*Loans.*All_Institutions_percentile", percentile_cols, value = TRUE)
+allowance_cols <- grep("Loss_Allowance.*Loans.*All_Institutions_percentile", percentile_cols, value = TRUE)
+asset_quality_vars <- c(noncurrent_cols, chargeoff_cols, allowance_cols)
+
+# Remove NA values and ensure we have variables
+profitability_vars <- profitability_vars[!is.na(profitability_vars)]
+capital_strength_vars <- capital_strength_vars[!is.na(capital_strength_vars)]
+asset_quality_vars <- asset_quality_vars[!is.na(asset_quality_vars)]
+
+
+# Calculate category averages (only if we have variables in each category)
+category_data <- state_percentiles %>%
+  rowwise() %>%
+  mutate(
+    Profitability = if(length(profitability_vars) > 0) mean(c_across(all_of(profitability_vars)), na.rm = TRUE) else NA_real_,
+    Capital_Strength = if(length(capital_strength_vars) > 0) mean(c_across(all_of(capital_strength_vars)), na.rm = TRUE) else NA_real_,
+    Asset_Quality = if(length(asset_quality_vars) > 0) 100 - mean(c_across(all_of(asset_quality_vars)), na.rm = TRUE) else NA_real_  # Invert for asset quality
+  ) %>%
+  select(Date, Profitability, Capital_Strength, Asset_Quality) %>%
+  pivot_longer(cols = -Date, names_to = "Category", values_to = "Percentile") %>%
+  filter(!is.na(Percentile))
+
+# Plot category trends
+if(nrow(category_data) > 0) {
+  category_plot <- plot_ly(category_data, x = ~Date, y = ~Percentile, color = ~Category,
+                          type = 'scatter', mode = 'lines+markers',
+                          line = list(width = 3), marker = list(size = 6)) %>%
+    layout(
+      title = paste(COMPARISON_STATE, "Banking Performance by Category"),
+      xaxis = list(title = "Date"),
+      yaxis = list(title = "Percentile (0-100)", range = c(0, 100)),
+      hovermode = 'x unified',
+      shapes = list(
+        list(type = "line",
+             x0 = min(category_data$Date), x1 = max(category_data$Date),
+             y0 = 50, y1 = 50,
+             line = list(color = "black", dash = "dash", width = 1))
+      )
+    )
+} else {
+  category_plot <- plotly_empty() %>%
+    layout(title = "No category data available for plotting")
+}
+
+print(category_plot)
+```
+
+## Key Findings Summary
+
+```{r findings}
+# Calculate latest performance summary
+latest_date <- max(state_percentiles$Date, na.rm = TRUE)
+latest_performance <- state_percentiles %>%
+  filter(Date == latest_date) %>%
+  select(ends_with("_percentile")) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Percentile") %>%
+  filter(!is.na(Percentile)) %>%
+  mutate(
+    Variable_Clean = str_remove(Variable, "_percentile") %>%
+      str_replace_all("_", " ") %>%
+      str_to_title(),
+    Performance = case_when(
+      Percentile >= 75 ~ "Strong (Top 25%)",
+      Percentile >= 50 ~ "Above Average",
+      Percentile >= 25 ~ "Below Average", 
+      TRUE ~ "Weak (Bottom 25%)"
+    )
+  ) %>%
+  arrange(desc(Percentile))
+
+# Display top and bottom performers
+cat("## Latest Performance Summary (", format(latest_date, "%B %Y"), ")\n\n")
+
+top_performers <- latest_performance %>% slice_head(n = 5)
+bottom_performers <- latest_performance %>% slice_tail(n = 5)
+
+cat("### Top 5 Performing Areas:\n")
+for(i in 1:nrow(top_performers)) {
+  cat(paste0(i, ". ", top_performers$Variable_Clean[i], ": ", 
+             round(top_performers$Percentile[i], 1), "th percentile (", 
+             top_performers$Performance[i], ")\n"))
+}
+
+cat("\n### Bottom 5 Performing Areas:\n")
+for(i in 1:nrow(bottom_performers)) {
+  cat(paste0(i, ". ", bottom_performers$Variable_Clean[i], ": ", 
+             round(bottom_performers$Percentile[i], 1), "th percentile (", 
+             bottom_performers$Performance[i], ")\n"))
+}
+```
+
+## Data Table: Complete Results
+
+```{r data-table}
+# Create interactive data table
+table_data <- state_percentiles %>%
+  select(Date, ends_with("_percentile")) %>%
+  mutate(Date = format(Date, "%Y-%m-%d")) %>%
+  rename_with(~ str_remove(.x, "_percentile") %>% 
+                str_replace_all("_", " ") %>% 
+                str_to_title(), 
+              ends_with("_percentile"))
+
+datatable(table_data, 
+          options = list(
+            scrollX = TRUE,
+            pageLength = 10,
+            dom = 'Bfrtip'
+          ),
+          caption = paste(COMPARISON_STATE, "Banking Performance Percentiles by Quarter")) %>%
+  formatRound(columns = 2:ncol(table_data), digits = 1)
+```
+
+## Conclusion
+
+This analysis provides a comprehensive view of `r COMPARISON_STATE`'s banking sector performance relative to other states. The percentile rankings help identify areas of strength and weakness in `r COMPARISON_STATE`'s banking industry over time.
+
+Key observations:
+- Percentiles above 50 indicate above-median performance compared to other states
+- Percentiles below 50 indicate below-median performance
+- Trends over time show how `r COMPARISON_STATE`'s relative performance has evolved
+- Category analysis helps identify broader patterns in profitability, capital strength, and asset quality
