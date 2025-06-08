@@ -1,0 +1,467 @@
+---
+title: "Grouping Method Comparison"
+author: "Banking Analysis Team"
+date: "June 5, 2025"
+format: pdf
+---
+
+# Method Comparison Analysis
+
+This document compares different state grouping methods for analyzing the Silicon Valley Bank crash effects.
+
+```{r setup}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Load libraries
+library(dplyr)
+library(readr)
+library(gt)
+library(ggplot2)
+library(estimatr)
+library(modelsummary)
+library(tidyr)
+library(tibble)
+library(cluster)
+library(maps)
+library(mapdata)
+
+# Load data
+lbank <- read_csv("combined_fdic_data_log.csv")
+lbank$State <- as.factor(lbank$State)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+# Global parameters
+analysis_variable <- "Core Deposits to Total Liabilities - All Institutions"
+crash_date <- as.Date("2023-03-31")
+exclude_states <- c("Nevada")
+
+# Filter data
+lbank <- lbank %>%
+  filter(!State %in% exclude_states)
+
+lbank$Date <- as.Date(lbank$Date)
+lbank$State <- droplevels(lbank$State)
+```
+
+```{r functions}
+#| warning: false
+#| message: false
+#| echo: false
+
+# Function to create complete analysis for any grouping method
+analyze_grouping <- function(state_list, group_name, lbank_data, analysis_var, crash_dt) {
+  
+  # Create grouping variable
+  lbank_data$treated <- ifelse(lbank_data$State %in% state_list, 1, 0)
+  lbank_data$post <- ifelse(lbank_data$Date >= crash_dt, 1, 0)
+  lbank_data$post <- as.factor(lbank_data$post)
+  lbank_data$treated <- as.factor(lbank_data$treated)
+  lbank_data$crash <- ifelse(lbank_data$treated == 1 & lbank_data$post == 1, 1, 0)
+  
+  # Create time variables for regression
+  lbank_data$year <- as.numeric(format(lbank_data$Date, "%Y"))
+  lbank_data$quarter <- quarters(lbank_data$Date)
+  lbank_data$year_quarter <- paste(lbank_data$year, lbank_data$quarter, sep = "_")
+  lbank_data$year_quarter <- as.factor(lbank_data$year_quarter)
+  lbank_data$State <- as.factor(lbank_data$State)
+  
+  # 1. Two-line graph data
+  avg_data <- lbank_data %>%
+    group_by(Date, treated) %>%
+    summarize(avg_var = mean(get(analysis_var), na.rm = TRUE), .groups = 'drop') %>%
+    mutate(Group = ifelse(treated == 1, paste(group_name, "States"), "Other States"))
+  
+  # 2. Diff-in-diff data
+  wide_data <- avg_data %>%
+    select(Date, Group, avg_var) %>%
+    pivot_wider(names_from = Group, values_from = avg_var) %>%
+    arrange(Date)
+  
+  group_cols <- names(wide_data)[names(wide_data) != "Date"]
+  treated_col <- group_cols[grepl(group_name, group_cols)]
+  control_col <- group_cols[!grepl(group_name, group_cols)]
+  
+  diff_data <- wide_data %>%
+    mutate(
+      Treated_Change = get(treated_col) - lag(get(treated_col)),
+      Control_Change = get(control_col) - lag(get(control_col)),
+      Difference_in_Differences = Treated_Change - Control_Change
+    ) %>%
+    filter(!is.na(Treated_Change))
+  
+  # 3. State trends for scatter plot
+  state_trends <- lbank_data %>%
+    group_by(State) %>%
+    arrange(Date) %>%
+    mutate(
+      period_change = get(analysis_var) - lag(get(analysis_var)),
+      is_pre = Date < crash_dt,
+      is_post = Date >= crash_dt
+    ) %>%
+    filter(!is.na(period_change)) %>%
+    summarize(
+      pre_trend = mean(period_change[is_pre], na.rm = TRUE),
+      post_trend = mean(period_change[is_post], na.rm = TRUE),
+      n_pre_obs = sum(is_pre),
+      n_post_obs = sum(is_post),
+      .groups = 'drop'
+    ) %>%
+    filter(n_pre_obs >= 2 & n_post_obs >= 2) %>%
+    mutate(group_assignment = ifelse(State %in% state_list, paste(group_name, "States"), "Other States"))
+  
+  # 4. Regression models
+  base_formula <- as.formula(paste("`", analysis_var, "` ~ crash", sep=""))
+  state_formula <- as.formula(paste("`", analysis_var, "` ~ crash + State", sep=""))
+  time_formula <- as.formula(paste("`", analysis_var, "` ~ crash + year_quarter", sep=""))
+  full_formula <- as.formula(paste("`", analysis_var, "` ~ crash + State + year_quarter", sep=""))
+  
+  model1 <- lm_robust(base_formula, data = lbank_data, se_type = "HC1")
+  model2 <- lm_robust(state_formula, data = lbank_data, se_type = "HC1")
+  model3 <- lm_robust(time_formula, data = lbank_data, se_type = "HC1")
+  model4 <- lm_robust(full_formula, data = lbank_data, se_type = "HC1")
+  
+  models_list <- list(
+    "(1)" = model1,
+    "(2)" = model2,
+    "(3)" = model3,
+    "(4)" = model4
+  )
+  
+  return(list(
+    avg_data = avg_data,
+    diff_data = diff_data,
+    state_trends = state_trends,
+    models = models_list,
+    group_name = group_name,
+    treated_states = state_list
+  ))
+}
+
+# Function to create all plots for a method
+create_plots <- function(analysis_result) {
+  group_name <- analysis_result$group_name
+  
+  # Colors
+  treated_name <- paste(group_name, "States")
+  colors <- c("#D55E00", "#009E73")
+  names(colors) <- c(treated_name, "Other States")
+  
+  # 1. Two-line plot
+  p1 <- ggplot(analysis_result$avg_data, aes(x = Date, y = avg_var, color = Group)) +
+    geom_line(size = 1.2) +
+    geom_vline(xintercept = crash_date, color = "red", linetype = "dotted", linewidth = 1) +
+    scale_color_manual(values = colors) +
+    labs(title = paste(group_name, "vs Other States"),
+         subtitle = "Average levels over time",
+         x = "Date",
+         y = paste(analysis_variable, "(log)"),
+         color = "Group") +
+    annotate("text", x = crash_date, y = min(analysis_result$avg_data$avg_var) + 0.01, 
+             label = "Crash", color = "red", vjust = -0.5, angle = 90, size = 3) +
+    theme_minimal()
+  
+  # 2. Diff-in-diff plot
+  p2 <- ggplot(analysis_result$diff_data, aes(x = Date, y = Difference_in_Differences)) +
+    geom_line(size = 1.2, color = "darkblue") +
+    geom_hline(yintercept = 0, color = "black", linetype = "solid", alpha = 0.5) +
+    geom_vline(xintercept = crash_date, color = "red", linetype = "dotted", linewidth = 1) +
+    labs(title = paste(group_name, "Diff-in-Diff"),
+         subtitle = "Difference in changes over time",
+         x = "Date",
+         y = "Difference-in-Differences (log)") +
+    annotate("text", x = crash_date, y = max(analysis_result$diff_data$Difference_in_Differences) - 0.005, 
+             label = "Crash", color = "red", vjust = -0.5, angle = 90, size = 3) +
+    theme_minimal()
+  
+  # 3. Scatter plot
+  scatter_colors <- c("#D55E00", "#009E73")
+  names(scatter_colors) <- c(treated_name, "Other States")
+  
+  p3 <- ggplot(analysis_result$state_trends, aes(x = pre_trend, y = post_trend, color = group_assignment)) +
+    geom_point(size = 3, alpha = 0.7) +
+    scale_color_manual(values = scatter_colors) +
+    labs(title = paste(group_name, "Differential Space"),
+         subtitle = "Pre-trend vs Post-trend by state",
+         x = "Average Change Before Event (Pre-Trend)",
+         y = "Average Change After Event (Post-Trend)",
+         color = "Group") +
+    theme_minimal() +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
+  
+  # 4. Map plot
+  # Get US state map data
+  states_map <- map_data("state")
+  
+  # Create state assignments for the map
+  map_assignments <- data.frame(
+    State = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
+              "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", 
+              "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", 
+              "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", 
+              "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", 
+              "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
+              "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", 
+              "Wisconsin", "Wyoming"),
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(
+      group_assignment = ifelse(State %in% analysis_result$treated_states, treated_name, "Other States"),
+      region = tolower(State)
+    )
+  
+  # Merge map data with assignments
+  map_data_with_groups <- states_map %>%
+    left_join(map_assignments, by = "region")
+  
+  # Define colors for the map (same as other plots)
+  map_colors <- c("#D55E00", "#009E73")
+  names(map_colors) <- c(treated_name, "Other States")
+  
+  # Create the map
+  p4 <- ggplot(map_data_with_groups, aes(x = long, y = lat, group = group, fill = group_assignment)) +
+    geom_polygon(color = "white", size = 0.2) +
+    scale_fill_manual(values = map_colors, na.value = "lightgray") +
+    coord_fixed(1.3) +
+    labs(title = paste(group_name, "Geographic Distribution"),
+         subtitle = "States colored by treatment assignment",
+         fill = "Group") +
+    theme_void() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "bottom"
+    )
+  
+  return(list(levels = p1, diff_in_diff = p2, scatter = p3, map = p4))
+}
+
+# Function to create regression table
+create_regression_table <- function(analysis_result) {
+  modelsummary(analysis_result$models,
+               title = paste("Effect of SVB Crash:", analysis_result$group_name, "States"),
+               stars = TRUE,
+               gof_map = c("nobs"),
+               coef_map = c("crash" = "Bank Crash",
+                            "(Intercept)" = "Intercept"),
+               coef_omit = "State|year_quarter",
+               fmt = "%.3f", 
+               notes = "Robust standard errors in parentheses.",
+               add_rows = tribble(
+                 ~term,         ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+                 "State FE",    "No",    "Yes",   "No",    "Yes",
+                 "Quarter FE",  "No",    "No",    "Yes",   "Yes"
+               ),
+               output = "gt") %>% 
+    tab_spanner(
+      label = paste(analysis_result$group_name, "States Analysis"),
+      columns = everything()
+    ) %>% 
+    tab_options(
+      table.width = pct(90),
+      heading.align = "left"
+    )
+}
+```
+
+# Method Definitions
+
+```{r method_definitions}
+#| echo: false
+
+# Define different grouping methods to test
+methods <- list(
+  "Geographic_West" = c("California", "Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico"),
+  "Geographic_Southeast" = c("Florida", "Georgia", "South Carolina", "North Carolina", "Virginia", "Tennessee", "Kentucky", "Alabama", "Mississippi", "Louisiana", "Arkansas"),
+  "Geographic_Northeast" = c("Maine", "New Hampshire", "Vermont", "Massachusetts", "Rhode Island", "Connecticut", "New York", "New Jersey", "Pennsylvania","Maryland","West Virginia","Ohio","Virginia"),
+  "Tech_Exposure" = c("California", "Connecticut", "Florida", "Illinois", "New York", "North Carolina", "Texas", "Washington", "Colorado", "Utah", "Delaware"),
+  "Bordered_West" = c("California","Washington","Oregon","Arizona")
+)
+
+cat("Methods to be tested:\n")
+for(name in names(methods)) {
+  cat(paste0(name, ": ", length(methods[[name]]), " states\n"))
+}
+```
+
+# Analysis Results
+
+```{r analysis_loop}
+#| warning: false
+#| message: false
+#| echo: false
+#| results: 'asis'
+
+# Run analysis for each method
+results <- list()
+
+for(method_name in names(methods)) {
+  cat(paste0("\n## ", gsub("_", " ", method_name), " Method\n\n"))
+  
+  # Run analysis
+  result <- analyze_grouping(
+    state_list = methods[[method_name]], 
+    group_name = gsub("_", " ", method_name),
+    lbank_data = lbank,
+    analysis_var = analysis_variable,
+    crash_dt = crash_date
+  )
+  
+  # Store result
+  results[[method_name]] <- result
+  
+  # Create plots
+  plots <- create_plots(result)
+  
+  # Display plots
+  print(plots$map)
+  cat("\n\n")
+  print(plots$levels)
+  cat("\n\n")
+  print(plots$diff_in_diff)
+  cat("\n\n")
+  print(plots$scatter)
+  cat("\n\n")
+  
+  # Summary statistics
+  cat("### Summary Statistics\n\n")
+  cat(paste("- Treated states:", length(result$treated_states), "\n"))
+  cat(paste("- Control states:", length(unique(lbank$State)) - length(result$treated_states), "\n"))
+  
+  # Pre-trend test
+  treated_pre <- mean(result$state_trends$pre_trend[result$state_trends$group_assignment == paste(gsub("_", " ", method_name), "States")], na.rm = TRUE)
+  control_pre <- mean(result$state_trends$pre_trend[result$state_trends$group_assignment == "Other States"], na.rm = TRUE)
+  pre_diff <- abs(treated_pre - control_pre)
+  
+  cat(paste("- Pre-trend difference:", round(pre_diff, 4), "\n"))
+  cat(paste("- Model 4 coefficient:", round(result$models[["(4)"]]$coefficients["crash"], 3), "\n"))
+  cat(paste("- Model 4 p-value:", round(result$models[["(4)"]]$p.value["crash"], 3), "\n\n"))
+  
+  cat("---\n\n")
+}
+```
+
+# Regression Tables
+
+## Geographic West Regression Results
+
+```{r}
+#| tbl-cap: "Effect of SVB Crash: Geographic West States"
+#| label: tbl-geographic-west
+#| echo: false
+
+if("Geographic_West" %in% names(results)) {
+  create_regression_table(results[["Geographic_West"]])
+}
+```
+
+## Geographic Southeast Regression Results
+
+```{r}
+#| tbl-cap: "Effect of SVB Crash: Geographic Southeast States"
+#| label: tbl-geographic-southeast
+#| echo: false
+
+if("Geographic_Southeast" %in% names(results)) {
+  create_regression_table(results[["Geographic_Southeast"]])
+}
+```
+
+## Geographic Northeast Regression Results
+
+```{r}
+#| tbl-cap: "Effect of SVB Crash: Geographic Northeast States"
+#| label: tbl-geographic-northeast
+#| echo: false
+
+if("Geographic_Northeast" %in% names(results)) {
+  create_regression_table(results[["Geographic_Northeast"]])
+}
+```
+
+## Tech Exposure Regression Results
+
+```{r}
+#| tbl-cap: "Effect of SVB Crash: Tech Exposure States"
+#| label: tbl-tech-exposure
+#| echo: false
+
+if("Tech_Exposure" %in% names(results)) {
+  create_regression_table(results[["Tech_Exposure"]])
+}
+```
+
+## Border West Regression Results
+
+```{r}
+#| tbl-cap: "Effect of SVB Crash: West Border States"
+#| label: tbl-border-west
+#| echo: false
+
+if("Bordered_West" %in% names(results)) {
+  create_regression_table(results[["Bordered_West"]])
+}
+```
+
+
+# Comparison Summary
+
+```{r comparison_summary}
+#| echo: false
+
+# Create comparison table
+comparison_df <- data.frame(
+  Method = character(),
+  Model4_Coefficient = numeric(),
+  Model4_PValue = numeric(),
+  Pre_Trend_Diff = numeric(),
+  Significant = character(),
+  stringsAsFactors = FALSE
+)
+
+for(method_name in names(results)) {
+  result <- results[[method_name]]
+  
+  # Get Model 4 results
+  coef_val <- result$models[["(4)"]]$coefficients["crash"]
+  p_val <- result$models[["(4)"]]$p.value["crash"]
+  
+  # Calculate pre-trend difference
+  treated_pre <- mean(result$state_trends$pre_trend[result$state_trends$group_assignment == paste(gsub("_", " ", method_name), "States")], na.rm = TRUE)
+  control_pre <- mean(result$state_trends$pre_trend[result$state_trends$group_assignment == "Other States"], na.rm = TRUE)
+  pre_diff <- abs(treated_pre - control_pre)
+  
+  # Significance
+  sig <- ifelse(p_val < 0.001, "***", 
+                ifelse(p_val < 0.01, "**",
+                       ifelse(p_val < 0.05, "*",
+                              ifelse(p_val < 0.1, "+", "No"))))
+  
+  comparison_df <- rbind(comparison_df, data.frame(
+    Method = gsub("_", " ", method_name),
+    Model4_Coefficient = round(coef_val, 4),
+    Model4_PValue = round(p_val, 3),
+    Pre_Trend_Diff = round(pre_diff, 4),
+    Significant = sig
+  ))
+}
+
+knitr::kable(comparison_df, 
+             caption = "Comparison of All Methods (Model 4 Results)",
+             col.names = c("Method", "Coefficient", "P-Value", "Pre-Trend Diff", "Significant"))
+```
+
+# Conclusions
+
+Based on the Model 4 results (with both state and quarter fixed effects), we can evaluate:
+
+1. **Statistical Significance**: Which methods show robust effects even with proper controls
+2. **Pre-trend Quality**: Which methods have similar pre-treatment trends
+3. **Economic Magnitude**: Size of the estimated effects
+
+The most credible results come from methods that show:
+- Significant effects in Model 4
+- Small pre-trend differences
+- Economically meaningful coefficient sizes

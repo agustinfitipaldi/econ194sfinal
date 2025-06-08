@@ -7,7 +7,7 @@ format: pdf
 
 # Executive Summary
 
-The objective of this paper is to show the journey our group went through in order to assess what effect the Silicon Valley Bank collapse had on the banking sector across states. In short, we found no statistically significant and causally probable effect.
+The objective of this paper is to show the journey our group went through in order to assess what effect the Silicon Valley Bank collapse had on the banking sector across states. In short, we found that there is no statistically significant effect that we can find with this data.
 
 ## The Setup
 
@@ -23,7 +23,73 @@ $$
 \text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
 $$ Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is $1$ if state $i$ is in our treatment group after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects.
 
-![](images/MapChart_Map(2).png)
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| fig-cap: "Geographic Treatment Group (Western States)"
+
+# Load required libraries first
+library(ggplot2)
+library(dplyr)
+
+# Install and load required packages for mapping
+if(!require(maps, quietly = TRUE)) {
+  install.packages("maps")
+  library(maps)
+}
+
+if(!require(mapdata, quietly = TRUE)) {
+  install.packages("mapdata")
+  library(mapdata)
+}
+
+# Get US state map data
+states_map <- map_data("state")
+
+# Create geographic grouping for the map (using current west_states definition)
+# This needs to be created early since west_states is defined later in the code
+current_west_states <- c("California","Washington","Oregon","Arizona")
+
+# Create state assignments for geographic grouping
+geo_state_assignments <- data.frame(
+  State = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
+            "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", 
+            "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", 
+            "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", 
+            "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", 
+            "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
+            "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", 
+            "Wisconsin", "Wyoming"),
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    geographic_group = ifelse(State %in% current_west_states, "Western States", "Non-Western States"),
+    region = tolower(State)
+  )
+
+# Merge map data with geographic assignments
+map_data_geographic <- states_map %>%
+  left_join(geo_state_assignments, by = "region")
+
+# Define colors for geographic groups
+geo_map_colors <- c("Western States" = "#D55E00", "Non-Western States" = "#009E73")
+
+# Create the geographic map
+ggplot(map_data_geographic, aes(x = long, y = lat, group = group, fill = geographic_group)) +
+  geom_polygon(color = "white", size = 0.2) +
+  scale_fill_manual(values = geo_map_colors, na.value = "lightgray") +
+  coord_fixed(1.3) +
+  labs(title = "Geographic Treatment Assignment",
+       subtitle = "Western states hypothesis for banking contagion",
+       fill = "Group") +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "bottom"
+  )
+```
 
 Below you can see a standard graph showing averages in core deposits to total liabilities across both groups. You can see that movement is mostly similar, albeit with slightly off sync jumps, and the western states drop below the other states after the crash.
 
@@ -42,12 +108,12 @@ analysis_variable <- "Core Deposits to Total Liabilities - All Institutions"  # 
 #                "Cost of Funding Earning Assets - All Institutions", etc.
 
 # States to include/exclude
-include_california <- FALSE  # Include California in clustering and analysis
+include_california <- TRUE  # Include California in clustering and analysis
 exclude_states <- c("Nevada")  # List of states to remove entirely
 # Example: c("Nevada", "Delaware", "South Dakota") for multiple states
 
 # Clustering configuration
-include_california_in_clustering <- FALSE     # Include CA in the clustering algorithm itself
+include_california_in_clustering <- TRUE     # Include CA in the clustering algorithm itself
 clustering_variable <- "Core Deposits to Total Liabilities - All Institutions"  # Variable used for k-means clustering
 # Can be different from analysis_variable if desired
 
@@ -103,9 +169,9 @@ lbank$State <- droplevels(lbank$State)  # Remove unused factor levels from exclu
 
 # Create geographic groupings (conditional on California inclusion)
 if(include_california) {
-  west_states <- c("California", "Oregon", "Arizona", "Washington", "Wyoming")
+  west_states <- c("California","Washington","Oregon","Arizona")
 } else {
-  west_states <- c("Oregon", "Arizona", "Washington", "Wyoming")
+  west_states <- c("Washington","Oregon","Arizona")
 }
 
 lbank$west <- ifelse(lbank$State %in% west_states, 1, 0)
@@ -567,57 +633,6 @@ ggplot(state_trends_geo, aes(x = pre_trend, y = post_trend, color = geographic_g
   geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
 ```
 
-```{r}
-#| warning: false
-#| message: false
-#| echo: false
-#| fig-cap: "Map of Optimal Group Assignments"
-
-# Install and load required packages for mapping
-if(!require(maps, quietly = TRUE)) {
-  install.packages("maps")
-  library(maps)
-}
-
-if(!require(mapdata, quietly = TRUE)) {
-  install.packages("mapdata")
-  library(mapdata)
-}
-
-# Get US state map data
-states_map <- map_data("state")
-
-# Create a lookup table for state assignments
-state_assignments <- state_trends %>%
-  select(State, optimal_cluster_name) %>%
-  mutate(region = tolower(State))
-
-# Handle special cases for state names that don't match exactly
-state_assignments$region[state_assignments$region == "district of columbia"] <- "district of columbia"
-
-# Merge map data with assignments
-map_data_with_groups <- states_map %>%
-  left_join(state_assignments, by = "region")
-
-# Define the same colors as used in the scatter plots
-map_colors <- c("Optimal Group 1" = "#E69F00", "Optimal Group 2" = "#56B4E9")
-
-# Create the map
-ggplot(map_data_with_groups, aes(x = long, y = lat, group = group, fill = optimal_cluster_name)) +
-  geom_polygon(color = "white", size = 0.2) +
-  scale_fill_manual(values = map_colors, na.value = "lightgray") +
-  coord_fixed(1.3) +
-  labs(title = "Optimal Group Assignments by State",
-       subtitle = "States colored by optimal matching algorithm results",
-       fill = "Group Assignment") +
-  theme_void() +
-  theme(
-    plot.title = element_text(hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5),
-    legend.position = "bottom"
-  )
-```
-
 Here we can see the first fruits of our labor, a two line graph illustrating the pre-trend and post-trend moves of our new optimal groups.
 
 ```{r}
@@ -776,6 +791,42 @@ modelsummary(models_list_optimal,
 
 Neat! Smaller effect, but much cleaner pre-trend, so rather convincing robustness check eh? The issue with this sentiment begins, however, with the fact that in this optimal matching, California falls in the *non-treated* group. That is to say, we found a statistically significant effect of -1.8% on core deposits to total liabilities after the silicon valley bank crisis for the following states:
 
-![](images/MapChart_Map(3)-01.png)
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| fig-cap: "Optimal Matching Group Assignments"
+
+# The optimal matching map was already created earlier, but we need to show it here
+# Create a lookup table for state assignments using the state_trends data
+optimal_state_assignments <- state_trends %>%
+  select(State, optimal_cluster_name) %>%
+  mutate(region = tolower(State))
+
+# Handle special cases for state names that don't match exactly
+optimal_state_assignments$region[optimal_state_assignments$region == "district of columbia"] <- "district of columbia"
+
+# Merge map data with assignments
+map_data_with_optimal_groups <- states_map %>%
+  left_join(optimal_state_assignments, by = "region")
+
+# Define the same colors as used in the scatter plots
+optimal_map_colors <- c("Optimal Group 1" = "#E69F00", "Optimal Group 2" = "#56B4E9")
+
+# Create the optimal matching map
+ggplot(map_data_with_optimal_groups, aes(x = long, y = lat, group = group, fill = optimal_cluster_name)) +
+  geom_polygon(color = "white", size = 0.2) +
+  scale_fill_manual(values = optimal_map_colors, na.value = "lightgray") +
+  coord_fixed(1.3) +
+  labs(title = "Optimal Matching Group Assignments",
+       subtitle = "States colored by data-driven optimal matching algorithm",
+       fill = "Group Assignment") +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "bottom"
+  )
+```
 
 The issues never end though, because no matter what size group you try, or whether you take california in or out, or even move the crash date around, there are always statistically significant results with seemingly odd and not very consistent groups of states. This is very clearly a nest of spurious correlations, and points rather squarely at the conclusion that the crash of Silicon Valley Bank, *when look at through this set of data, which is quarterly*, had no real effect on banking across states.
