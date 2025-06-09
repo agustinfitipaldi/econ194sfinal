@@ -185,14 +185,18 @@ gt_table <- head(merged, 10) %>%
 gt_table
 
 # Add bar graph
-ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
+graph <- ggplot(head(merged, 10), aes(x = reorder(State, diff), y = diff)) +
   geom_bar(stat = "identity", fill = "steelblue") +
   coord_flip() +
   labs(title = "Log Change in Core Deposits After Shock",
        x = "State",
        y = "Log Difference (2022 Q4 - 2023 Q1)") +
   theme_minimal()
+
+graph
+ggsave("log_change_hist.png", plot = graph)
 ```
+
 ```{r}
 #| warning: false
 #| message: false
