@@ -1,0 +1,163 @@
+---
+title: "Not the Neighbor You Want: Regional Contagion from Silicon Valley Bank Collapse"
+author: "Tony Segal, Agustin Fitipaldi, Andrew Reilly, Elijah Stevenson"
+date: "June 9, 2025"
+format: pdf
+---
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| fig-cap: "Average Log Core Deposits to Total Liabilities Between Western and Eastern U.S. States"
+#| label: fig-CDTime
+#| fig-pos: "h"
+
+library(dplyr)
+library(readr)
+library(gt)
+library(ggplot2)
+library(estimatr)
+library(modelsummary)
+
+lbank <- read_csv("combined_fdic_data_log.csv")
+
+#change data types
+names(lbank)[10] <- "core_deposit"
+lbank$State <- as.factor(lbank$State)
+lbank$core_deposit <- as.numeric(lbank$core_deposit)
+lbank$Date <- as.Date(lbank$Date, format = "%m/%d/%Y")
+
+# Filter out Nevada
+lbank <- lbank %>%
+  filter(State != "Nevada") %>% 
+  select(State, Date, core_deposit)
+
+#add west and post binary variables
+lbank$west <- factor( ifelse(lbank$State %in% c("Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico"), 1, 0))
+lbank$post <- factor( ifelse(lbank$Date >= as.Date("2023-03-31"), 1, 0))
+
+
+# Calculate averages for Western and non-Western states
+avg_deposits <- lbank %>%
+  group_by(Date, west) %>%
+  summarize(avg_core_deposit = mean(core_deposit, na.rm = TRUE)) %>%
+  mutate(Region = ifelse(west == 1, "Western States", "Non-Western States"))
+
+# Create single plot with averages
+parallel <- ggplot(data = avg_deposits,
+       aes(x = Date, y = avg_core_deposit, color = Region)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = as.Date("2022-12-31"), color = "red", linetype = "dotted", linewidth = 1) +
+  labs(#title = "Average Log Core Deposits Over Time - Western vs Non-Western States",
+       x = "Date",
+       y = "Core Deposits (log)",
+       color = "Region") + 
+  annotate("text", 
+           x = as.Date("2022-12-31"), 
+           y = min(avg_deposits$avg_core_deposit) + 0.01, 
+           label = "Crash", 
+           color = "red", 
+           vjust = -0.5, 
+           angle = 90, 
+           size = 4)
+ggsave("core_deposit_over_time.png", plot = parallel, width = 10, height = 6)
+
+parallel
+```
+
+# Executive Summary
+
+On March 10, 2023, Silicon Valley Bank (SVB) was rendered insolvent and closed by federal regulators, marking the second biggest bank collapse in history second to only Washington Mutual in 2008. SVB was unique among midsize banks as it was responsible for almost half of all venture capital and start-ups around the world (Grossman, 2024). In today's globalized economy, bank runs can have effects all over the planet, but it may be possible that areas in geographical proximity experience heightened effects. The study "Not the Neighbor You Want: Regional Contagion from Silicon Valley Bank Collapse" analyzes regional contagion from bank collapses on first order effects in the form of core deposits to total liabilities.
+
+In order to analyze regional changes in core deposits to total liabilities we first had to collect data from the Federal Deposit Insurance Corporation (FDIC). This data was formatted into panel style grouped by state and business quarters between 2019 and 2025. Our final variables of interest were state, date/quarter, and log core deposit to total liabilities for all institutions since this would make disproportionate banking sectors more comparable (??). From here, binary variables were created to represent western and non-western state groupings, as well as pre and post SVB crash dates (after 2022 quarter 4). Then, a final binary variable was created to represent observations on the west state grouping and after the crash date. 
+
+In order to analyze changes in core deposits to total liabilities, the following specification was used:
+
+$$
+\text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
+$$ 
+
+Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is $1$ if state $i$ is in our treatment group after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects.
+
+
+The Figure below displays the western state grouping used for the crash variable. Nevada was omitted because there was an unrelated large drop in its core deposits to total liabilities before the crash date. California was also removed from the group since SVB is located in California and we wanted to check for effects outside of the state itself. (WE SHOULD REMOVE CALIFORNIA from map)
+
+![](West_states.png)
+
+## Results
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
+#| label: tbl-pannel
+
+
+#binary crash variable
+lbank$crash <- ifelse(lbank$west == 1 & lbank$post == 1, 1, 0)
+
+lbank$Date <- as.factor(lbank$Date)
+
+
+#Panel Regression set up with state and year fixed effects
+panel_reg <-lm_robust(core_deposit ~ crash + State + Date, data = lbank, se_type = "HC1")
+
+
+
+#create 4 different models
+model1 <- lm_robust(core_deposit ~ crash, data = lbank, se_type = "HC1")
+
+model2 <- lm_robust(core_deposit ~ crash + State, data = lbank, se_type = "HC1")
+
+model3 <- lm_robust(core_deposit ~ crash + Date, data = lbank, se_type = "HC1")
+
+model4 <- lm_robust(core_deposit ~ crash + State + Date, data = lbank, se_type = "HC1")
+
+#create list of models
+models_list <- list(
+  "(1)" = model1,
+  "(2)" = model2,
+  "(3)" = model3,
+  "(4)" = model4
+)
+
+modelsummary(models_list,
+             title = "Effect of Silicon Valley Bank Crash on Western States",
+             stars = TRUE,
+             gof_map = c("nobs"),
+             coef_map = c("crash" = "Bank Crash",
+                          "(Intercept)" = "Intercept"),
+             coef_omit = "State|Date",
+             fmt = "%.3f", 
+             notes = "Robust standard erros in parenthesis.",
+             add_rows = tribble(
+               ~term,      ~"(1)",  ~"(2)",  ~"(3)",  ~"(4)",
+               "State FE", "No",    "Yes",   "No",    "Yes",
+               "Year FE",  "No",    "No",    "Yes",    "Yes"
+             ),
+             output = "gt") %>% 
+  tab_spanner(
+    label = "Log Core Deposits",
+    columns = everything()
+  ) %>% 
+  tab_options(
+    table.width = pct(90),
+    heading.align = "left"
+  )
+```
+
+@tbl-cap displays the results from our regression. According to out data, there is an additional 6.2% decrease in core deposits to total liabilities in western states compared to eastern. At this rate, we reject the hypothesis that western and eastern states core deposits to total liabilities are equally affected.
+
+MAYBE ROBUSTNESS CHECKING ??
+
+## Discussion
+
+Based on the data for core deposits to total liabilities, there appears to be a regional contagion effects, where states in closer geographical proximity tend to experience higher effects compared to those located further away. This effect is not necessarily causal since ...
+
+continue with some more discussion
+
+
+
+
