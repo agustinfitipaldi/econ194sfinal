@@ -108,12 +108,12 @@ analysis_variable <- "Core Deposits to Total Liabilities - All Institutions"  # 
 #                "Cost of Funding Earning Assets - All Institutions", etc.
 
 # States to include/exclude
-include_california <- TRUE  # Include California in clustering and analysis
+include_california <- FALSE  # Include California in clustering and analysis
 exclude_states <- c("Nevada","Arizona")  # List of states to remove entirely
 # Example: c("Nevada", "Delaware", "South Dakota") for multiple states
 
 # Clustering configuration
-include_california_in_clustering <- TRUE     # Include CA in the clustering algorithm itself
+include_california_in_clustering <- FALSE     # Include CA in the clustering algorithm itself
 clustering_variable <- "Core Deposits to Total Liabilities - All Institutions"  # Variable used for k-means clustering
 # Can be different from analysis_variable if desired
 
