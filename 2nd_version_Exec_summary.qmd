@@ -2,16 +2,37 @@
 title: "Not the Neighbor You Want: Regional Contagion from Silicon Valley Bank Collapse"
 author: "Tony Segal, Agustin Fitipaldi, Andrew Reilly, Elijah Stevenson"
 date: "June 9, 2025"
-format: pdf
+format: 
+  pdf:
+    documentclass: article
+    geometry: 
+      - margin=0.75in
+    fontsize: 10pt
+    classoption: twocolumn
+    include-in-header: 
+      text: |
+        \makeatletter
+        \renewcommand{\maketitle}{%
+          \begin{flushleft}
+          {\Large\bfseries\@title\par}
+          \vspace{0.5em}
+          {\normalsize\@author\par}
+          \vspace{0.25em}
+          {\normalsize\@date\par}
+          \end{flushleft}
+          \vspace{1em}
+        }
+        \makeatother
 ---
 
 ```{r}
 #| warning: false
 #| message: false
 #| echo: false
-#| fig-cap: "Average Log Core Deposits to Total Liabilities Between Western and Eastern U.S. States"
+#| fig-cap: "Average Log Core Deposits to Total Liabilities Between Western and Eastern US States"
 #| label: fig-CDTime
-#| fig-pos: "h"
+#| fig-width: 3.5
+#| fig-height: 2.5
 
 library(dplyr)
 library(readr)
@@ -60,7 +81,10 @@ parallel <- ggplot(data = avg_deposits,
            color = "red", 
            vjust = -0.5, 
            angle = 90, 
-           size = 4)
+           size = 4) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal")
 ggsave("core_deposit_over_time.png", plot = parallel, width = 10, height = 6)
 
 parallel
@@ -70,20 +94,86 @@ parallel
 
 On March 10, 2023, Silicon Valley Bank (SVB) was rendered insolvent and closed by federal regulators, marking the second biggest bank collapse in history second to only Washington Mutual in 2008. SVB was unique among midsize banks as it was responsible for almost half of all venture capital and start-ups around the world (Grossman, 2024). In today's globalized economy, bank runs can have effects all over the planet, but it may be possible that areas in geographical proximity experience heightened effects. The study "Not the Neighbor You Want: Regional Contagion from Silicon Valley Bank Collapse" analyzes regional contagion from bank collapses on first order effects in the form of core deposits to total liabilities.
 
-In order to analyze regional changes in core deposits to total liabilities we first had to collect data from the Federal Deposit Insurance Corporation (FDIC). This data was formatted into panel style grouped by state and business quarters between 2019 and 2025. Our final variables of interest were state, date/quarter, and log core deposit to total liabilities for all institutions since this would make disproportionate banking sectors more comparable (??). From here, binary variables were created to represent western and non-western state groupings, as well as pre and post SVB crash dates (after 2022 quarter 4). Then, a final binary variable was created to represent observations on the west state grouping and after the crash date. 
+In order to analyze regional changes in core deposits to total liabilities we first had to collect data from the Federal Deposit Insurance Corporation (FDIC). This data was formatted into panel style grouped by state and business quarters between 2019 and 2025. Our final variables of interest were state, date/quarter, and log core deposit to total liabilities for all institutions since this would make disproportionate banking sectors more comparable (??). From here, binary variables were created to represent western and non-western state groupings, as well as pre and post SVB crash dates (after 2022 quarter 4). Then, a final binary variable was created to represent observations on the west state grouping and after the crash date.
 
 In order to analyze changes in core deposits to total liabilities, the following specification was used:
 
 $$
 \text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
-$$ 
+$$
 
 Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is $1$ if state $i$ is in our treatment group after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects.
 
-
 The Figure below displays the western state grouping used for the crash variable. Nevada was omitted because there was an unrelated large drop in its core deposits to total liabilities before the crash date. California was also removed from the group since SVB is located in California and we wanted to check for effects outside of the state itself. (WE SHOULD REMOVE CALIFORNIA from map)
 
-![](West_states.png)
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+#| fig-cap: "Geographic Treatment Group (Western States)"
+#| fig-width: 3.5
+#| fig-height: 2.5
+
+# Install and load required packages for mapping
+if(!require(maps, quietly = TRUE)) {
+  install.packages("maps")
+  library(maps)
+}
+
+if(!require(mapdata, quietly = TRUE)) {
+  install.packages("mapdata")
+  library(mapdata)
+}
+
+# Get US state map data
+states_map <- map_data("state")
+
+# Create geographic grouping for the map (excluding California and Nevada)
+west_states_map <- c("Oregon", "Arizona", "Washington", "Idaho", "Utah", "Montana", "Wyoming", "Colorado", "New Mexico")
+
+# Create state assignments for geographic grouping
+geo_state_assignments <- data.frame(
+  State = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
+            "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", 
+            "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", 
+            "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", 
+            "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", 
+            "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
+            "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", 
+            "Wisconsin", "Wyoming"),
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    geographic_group = case_when(
+      State %in% west_states_map ~ "Western States",
+      State %in% c("California", "Nevada") ~ "Excluded",
+      TRUE ~ "Non-Western States"
+    ),
+    region = tolower(State)
+  )
+
+# Merge map data with geographic assignments
+map_data_geographic <- states_map %>%
+  left_join(geo_state_assignments, by = "region")
+
+# Define colors for geographic groups (Nevada and California grayed out)
+geo_map_colors <- c("Western States" = "#D55E00", "Non-Western States" = "#009E73", "Excluded" = "lightgray")
+
+# Create the geographic map
+ggplot(map_data_geographic, aes(x = long, y = lat, group = group, fill = geographic_group)) +
+  geom_polygon(color = "white", size = 0.2) +
+  scale_fill_manual(values = geo_map_colors, na.value = "lightgray") +
+  coord_fixed(1.3) +
+  labs(title = "Geographic Treatment Assignment",
+       subtitle = "Western states hypothesis for banking contagion",
+       fill = "Group") +
+  theme_void() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "bottom"
+  )
+```
 
 ## Results
 
@@ -93,6 +183,7 @@ The Figure below displays the western state grouping used for the crash variable
 #| echo: false
 #| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
 #| label: tbl-pannel
+#| tbl-colwidths: [20,20,20,20,20]
 
 
 #binary crash variable
@@ -157,7 +248,3 @@ MAYBE ROBUSTNESS CHECKING ??
 Based on the data for core deposits to total liabilities, there appears to be a regional contagion effects, where states in closer geographical proximity tend to experience higher effects compared to those located further away. This effect is not necessarily causal since ...
 
 continue with some more discussion
-
-
-
-
