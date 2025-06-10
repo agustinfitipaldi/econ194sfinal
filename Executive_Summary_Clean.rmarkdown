@@ -5,6 +5,8 @@ date: "June 5, 2025"
 format: pdf
 ---
 
+
+
 # Executive Summary
 
 The objective of this paper is to show the journey our group went through in order to assess what effect the Silicon Valley Bank collapse had on the banking sector across states. In short, we found that there is no statistically significant effect that we can find with this data.
@@ -22,6 +24,8 @@ To test this theory, we decided to split the states with the following group bei
 $$
 \text{CoreDeposits}_{it} = \beta_0 + \beta_1\text{Crash}_{it} + \gamma_i + \tau_t + \epsilon_{it}
 $$ Where $\beta_0$ and $\beta_1$ are the intercept and slope coefficient parameters respectively. $\text{Crash}_{it}$ is a binary variable that is $1$ if state $i$ is in our treatment group after the Silicon Valley Bank crash. $\gamma_i$ represents state fixed effects and $\tau_t$ stands for time fixed effects.
+
+
 
 ```{r}
 #| warning: false
@@ -91,7 +95,11 @@ ggplot(map_data_geographic, aes(x = long, y = lat, group = group, fill = geograp
   )
 ```
 
+
+
 Below you can see a standard graph showing averages in core deposits to total liabilities across both groups. You can see that movement is mostly similar, albeit with slightly off sync jumps, and the western states drop below the other states after the crash.
+
+
 
 ```{r}
 #| warning: false
@@ -207,7 +215,11 @@ ggplot(data = avg_deposits,
   theme_minimal()
 ```
 
+
+
 In another chart, you can see a clear difference in difference graphed out. This show us (change in west)-(change in east), and you can see a bit of a jump in the second quarter of 2020, which lines up with our previously judged "lag" in the graph above. Our pretrends appear semi-passable, so we are good to look at regression results.
+
+
 
 ```{r}
 #| warning: false
@@ -250,9 +262,13 @@ ggplot(data = diff_data, aes(x = Date, y = Difference_in_Differences)) +
   theme_minimal()
 ```
 
+
+
 ## Regression Results
 
 Finally we reach our regression. With four models displaying the different combination of fixed effects. We see statistical significance almost across the board except for dropping out when quarter fixed effects are turned on and state fixed effects are turned off. So this feels like a good sign! The toughest model to pass, with both fixed effects turned on, yielded a -6.2% impact on the treated group when compared with the non-treated group and controlling for differences across state and across time.
+
+
 
 ```{r}
 #| tbl-cap: "Effect of Silicon Valley Bank Crash on Western States"
@@ -324,6 +340,8 @@ modelsummary(models_list,
   )
 ```
 
+
+
 However, in order to test robustness and probe at our theory, which had admitted holes from the beginning (what is it about physical borders that would affect this?) we tried different grouping mechanisms in search of more effect.
 
 # Checking Our Work
@@ -345,6 +363,8 @@ Our objective is to find two points, $(x_1,y_1)$ and $(x_2,y_2)$, our cluster me
 3.  A potential cluster point minimizes the distance between itself and the rest of the states. This one is more complicated to write down, but it involves calculating distances between points in $R^2$, so $\min(\sqrt{x_1+x_i+y_1+y_i})$, and likewise for the other point. This ensures our solution isn't the trivial one with both points at positive and negative infinity.
 
 This apparently has a name already, its called Optimal Matching, and has its roots in genetics! Adapted for our econometrics problem, though, its a statistically-significant-diff-in-diff blood hound. Set loose on our data set, it will find the most optimal group according to the state data and crash date we supply to it.
+
+
 
 ```{r}
 #| warning: false
@@ -633,7 +653,11 @@ ggplot(state_trends_geo, aes(x = pre_trend, y = post_trend, color = geographic_g
   geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5)
 ```
 
+
+
 Here we can see the first fruits of our labor, a two line graph illustrating the pre-trend and post-trend moves of our new optimal groups.
+
+
 
 ```{r}
 #| warning: false
@@ -672,9 +696,13 @@ ggplot(data = avg_deposits_optimal, aes(x = Date, y = avg_analysis_var, color = 
   theme_minimal()
 ```
 
+
+
 ## 
 
 It seems to have done its job extremely well, the lines are practically copies of eachother and there's a very clear separation after the crash. Let's take a peek at the diff-in-diff graph,
+
+
 
 ```{r}
 #| warning: false
@@ -717,7 +745,11 @@ ggplot(data = diff_data_optimal, aes(x = Date, y = Difference_in_Differences)) +
   theme_minimal()
 ```
 
+
+
 Hmm... For comparisons sake its been placed on the same y-axis as the other separation, so you can see that there is very little chatter before the crash, as intended. But the effect also looks rather downsized, curious. Let's look at some regression numbers,
+
+
 
 ```{r}
 #| tbl-cap: "Effect of Silicon Valley Bank Crash using Optimal Matching"
@@ -789,7 +821,11 @@ modelsummary(models_list_optimal,
   )
 ```
 
+
+
 Neat! Smaller effect, but much cleaner pre-trend, so rather convincing robustness check eh? The issue with this sentiment begins, however, with the fact that in this optimal matching, California falls in the *non-treated* group. That is to say, we found a statistically significant effect of -1.8% on core deposits to total liabilities after the silicon valley bank crisis for the following states:
+
+
 
 ```{r}
 #| warning: false
@@ -829,4 +865,7 @@ ggplot(map_data_with_optimal_groups, aes(x = long, y = lat, group = group, fill 
   )
 ```
 
+
+
 The issues never end though, because no matter what size group you try, or whether you take california in or out, or even move the crash date around, there are always statistically significant results with seemingly odd and not very consistent groups of states. This is very clearly a nest of spurious correlations, and points rather squarely at the conclusion that the crash of Silicon Valley Bank, *when look at through this set of data, which is quarterly*, had no real effect on banking across states.
+
