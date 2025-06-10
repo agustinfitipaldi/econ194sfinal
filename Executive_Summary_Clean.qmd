@@ -109,7 +109,7 @@ analysis_variable <- "Core Deposits to Total Liabilities - All Institutions"  # 
 
 # States to include/exclude
 include_california <- TRUE  # Include California in clustering and analysis
-exclude_states <- c("Nevada")  # List of states to remove entirely
+exclude_states <- c("Nevada","Arizona")  # List of states to remove entirely
 # Example: c("Nevada", "Delaware", "South Dakota") for multiple states
 
 # Clustering configuration
